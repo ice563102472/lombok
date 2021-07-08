@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2020 The Project Lombok Authors.
+ * Copyright (C) 2016-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,6 @@ import static lombok.javac.JavacTreeMaker.TypeTag.typeTag;
 import java.io.IOException;
 import java.io.Writer;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -188,12 +187,6 @@ public class PrettyPrinter extends JCTree.Visitor {
 		return getEndPosition(tree, compilationUnit);
 	}
 	
-	private static int lineEndPos(String s, int start) {
-		int pos = s.indexOf('\n', start);
-		if (pos < 0) pos = s.length();
-		return pos;
-	}
-	
 	private boolean needsAlign, needsNewLine, onNewLine = true, needsSpace, aligned;
 	
 	public static final class UncheckedIOException extends RuntimeException {
@@ -284,7 +277,6 @@ public class PrettyPrinter extends JCTree.Visitor {
 		onNewLine = false;
 		aligned = false;
 	}
-	
 	
 	private void println() {
 		try {
@@ -434,23 +426,25 @@ public class PrettyPrinter extends JCTree.Visitor {
 	private void printDocComment(JCTree tree) {
 		String dc = getJavadocFor(tree);
 		if (dc == null) return;
+		
 		aPrintln("/**");
-		int pos = 0;
-		int endpos = lineEndPos(dc, pos);
 		boolean atStart = true;
-		while (pos < dc.length()) {
-			String line = dc.substring(pos, endpos);
-			if (line.trim().isEmpty() && atStart) {
+		
+		for (String line : dc.split("\\r?\\n")) {
+			if (atStart && line.trim().isEmpty()) {
 				atStart = false;
 				continue;
 			}
+			
 			atStart = false;
 			aPrint(" *");
-			if (pos < dc.length() && dc.charAt(pos) > ' ') print(" ");
-			println(dc.substring(pos, endpos));
-			pos = endpos + 1;
-			endpos = lineEndPos(dc, pos);
+			if (!line.isEmpty() && !Character.isWhitespace(line.charAt(0))) {
+				print(" ");
+			}
+			
+			println(line);
 		}
+		
 		aPrintln(" */");
 	}
 	
@@ -520,10 +514,12 @@ public class PrettyPrinter extends JCTree.Visitor {
 		boolean isInterface = (tree.mods.flags & INTERFACE) != 0;
 		boolean isAnnotationInterface = isInterface && (tree.mods.flags & ANNOTATION) != 0;
 		boolean isEnum = (tree.mods.flags & ENUM) != 0;
+		boolean isRecord = (tree.mods.flags & RECORD) != 0;
 		
 		if (isAnnotationInterface) print("@interface ");
 		else if (isInterface) print("interface ");
 		else if (isEnum) print("enum ");
+		else if (isRecord) print("record ");
 		else print("class ");
 		
 		print(tree.name);
@@ -535,6 +531,9 @@ public class PrettyPrinter extends JCTree.Visitor {
 			print(tree.typarams, ", ");
 			print(">");
 		}
+		
+		if (isRecord) printRecordConstructor(tree.defs);
+		
 		JCTree extendsClause = getExtendsClause(tree);
 		if (extendsClause != null) {
 			print(" extends ");
@@ -553,6 +552,23 @@ public class PrettyPrinter extends JCTree.Visitor {
 		indent--;
 		aPrintln("}", tree);
 		currentTypeName = prevTypeName;
+	}
+	
+	private void printRecordConstructor(List<JCTree> members) {
+		boolean first = true;
+		print("(");
+		for (JCTree member : members) {
+			if (member instanceof JCVariableDecl) {
+			JCVariableDecl variableDecl = (JCVariableDecl) member;
+				if ((variableDecl.mods.flags & GENERATED_MEMBER) != 0) {
+					if (!first) print(", ");
+					first = false;
+					printAnnotations(variableDecl.mods.annotations, false);
+					printVarDef0(variableDecl);
+				}
+			}
+		}
+		print(")");
 	}
 	
 	private void printClassMembers(List<JCTree> members, boolean isEnum, boolean isInterface) {
@@ -584,6 +600,7 @@ public class PrettyPrinter extends JCTree.Visitor {
 				JCTree init = ((JCVariableDecl) member).init;
 				typeOfPrevEnumMember = init instanceof JCNewClass && ((JCNewClass) init).def != null ? 2 : 1;
 			} else if (member instanceof JCVariableDecl) {
+				if ((((JCVariableDecl) member).mods.flags & GENERATED_MEMBER) != 0) continue;
 				if (prefType != null && prefType != JCVariableDecl.class) println();
 				if (isInterface) flagMod = -1L & ~(PUBLIC | STATIC | FINAL);
 				print(member);
@@ -796,21 +813,28 @@ public class PrettyPrinter extends JCTree.Visitor {
 			print(tree.name);
 		}
 		
+		boolean argsLessConstructor = false;
+		if (isConstructor && (tree.mods.flags & COMPACT_RECORD_CONSTRUCTOR) != 0) {
+			argsLessConstructor = true;
+		}
+		
 		boolean first = true;
-		print("(");
-		
-		JCVariableDecl recvparam = readObject(tree, "recvparam", null);
-		if (recvparam != null) {
-			printVarDefInline(recvparam);
-			first = false;
+		if (!argsLessConstructor) {
+			print("(");
+			
+			JCVariableDecl recvparam = readObject(tree, "recvparam", null);
+			if (recvparam != null) {
+				printVarDefInline(recvparam);
+				first = false;
+			}
+			
+			for (JCVariableDecl param : tree.params) {
+				if (!first) print(", ");
+				first = false;
+				printVarDefInline(param);
+			}
+			print(")");
 		}
-		
-		for (JCVariableDecl param : tree.params) {
-			if (!first) print(", ");
-			first = false;
-			printVarDefInline(param);
-		}
-		print(")");
 		
 		if (tree.thrown.nonEmpty()) {
 			print(" throws ");
@@ -1391,9 +1415,10 @@ public class PrettyPrinter extends JCTree.Visitor {
 	}
 	
 	void printBindingPattern(JCTree tree) {
-		print((JCExpression) readObject(tree, "vartype", null));
+		JCTree var = readObject(tree, "var", tree);
+		print((JCExpression) readObject(var, "vartype", null));
 		print(" ");
-		print((Name) readObject(tree, "name", null));
+		print((Name) readObject(var, "name", null));
 	}
 	
 	@Override public void visitTry(JCTry tree) {
@@ -1551,13 +1576,7 @@ public class PrettyPrinter extends JCTree.Visitor {
 	}
 	
 	public static JCTree getExtendsClause(JCClassDecl decl) {
-		try {
-			return (JCTree) getExtendsClause.invoke(decl);
-		} catch (IllegalAccessException e) {
-			throw sneakyThrow(e);
-		} catch (InvocationTargetException e) {
-			throw sneakyThrow(e.getCause());
-		}
+		return (JCTree) Permit.invokeSneaky(getExtendsClause, decl);
 	}
 	
 	static RuntimeException sneakyThrow(Throwable t) {
@@ -1614,7 +1633,7 @@ public class PrettyPrinter extends JCTree.Visitor {
 			printAnnotatedType0(tree);
 		} else if (className.endsWith("$JCPackageDecl")) {
 			// Starting with JDK9, this is inside the import list, but we've already printed it. Just ignore it.
-		} else if (className.endsWith(".JCSwitchExpression")) { // Introduced as preview feature in JDK12
+		} else if (className.endsWith("$JCSwitchExpression")) { // Introduced as preview feature in JDK12
 			printSwitchExpression(tree);
 		} else if (className.endsWith("$JCYield")) { // Introduced as preview feature in JDK13, part of switch expressions.
 			printYieldExpression(tree);

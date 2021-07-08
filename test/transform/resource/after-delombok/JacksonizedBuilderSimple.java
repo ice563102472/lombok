@@ -1,3 +1,4 @@
+//version 8: Jackson deps are at least Java7+.
 import java.util.List;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -23,11 +24,17 @@ class JacksonizedBuilderSimple<T> {
 		@java.lang.SuppressWarnings("all")
 		JacksonizedBuilderSimpleBuilder() {
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public JacksonizedBuilderSimple.JacksonizedBuilderSimpleBuilder<T> yes(final int yes) {
 			this.yes = yes;
 			return this;
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public JacksonizedBuilderSimple.JacksonizedBuilderSimpleBuilder<T> also(final List<T> also) {
 			this.also = also;

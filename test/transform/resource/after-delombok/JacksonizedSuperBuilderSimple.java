@@ -1,3 +1,4 @@
+//version 8: Jackson deps are at least Java7+.
 public class JacksonizedSuperBuilderSimple {
 	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
 	@com.fasterxml.jackson.databind.annotation.JsonDeserialize(builder = JacksonizedSuperBuilderSimple.Parent.ParentBuilderImpl.class)
@@ -11,6 +12,9 @@ public class JacksonizedSuperBuilderSimple {
 			protected abstract B self();
 			@java.lang.SuppressWarnings("all")
 			public abstract C build();
+			/**
+			 * @return {@code this}.
+			 */
 			@java.lang.SuppressWarnings("all")
 			public B field1(final int field1) {
 				this.field1 = field1;

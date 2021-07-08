@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2020 The Project Lombok Authors.
+ * Copyright (C) 2012-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,12 +37,9 @@ import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
 import lombok.javac.JavacTreeMaker;
 import lombok.javac.handlers.JavacHandlerUtil.CopyJavadoc;
-
-import org.mangosdk.spi.ProviderFor;
+import lombok.spi.Provides;
 
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
@@ -62,7 +59,7 @@ import com.sun.tools.javac.util.Name;
 /**
  * Handles the {@code lombok.With} annotation for javac.
  */
-@ProviderFor(JavacAnnotationHandler.class)
+@Provides
 public class HandleWith extends JavacAnnotationHandler<With> {
 	public void generateWithForType(JavacNode typeNode, JavacNode errorNode, AccessLevel level, boolean checkForTypeLevelWith) {
 		if (checkForTypeLevelWith) {
@@ -212,10 +209,8 @@ public class HandleWith extends JavacAnnotationHandler<With> {
 		
 		JCMethodDecl createdWith = createWith(access, fieldNode, fieldNode.getTreeMaker(), source, onMethod, onParam, makeAbstract);
 		createRelevantNonNullAnnotation(fieldNode, createdWith);
-		ClassSymbol sym = ((JCClassDecl) fieldNode.up().get()).sym;
-		Type returnType = sym == null ? null : sym.type;
-		
-		injectMethod(typeNode, createdWith, List.<Type>of(getMirrorForFieldType(fieldNode)), returnType);
+		recursiveSetGeneratedBy(createdWith, source);
+		injectMethod(typeNode, createdWith);
 	}
 	
 	public JCMethodDecl createWith(long access, JavacNode field, JavacTreeMaker maker, JavacNode source, List<JCAnnotation> onMethod, List<JCAnnotation> onParam, boolean makeAbstract) {
@@ -234,7 +229,7 @@ public class HandleWith extends JavacAnnotationHandler<With> {
 		long flags = JavacHandlerUtil.addFinalIfNeeded(Flags.PARAMETER, field.getContext());
 		List<JCAnnotation> annsOnParam = copyAnnotations(onParam).appendList(copyableAnnotations);
 		
-		JCExpression pType = cloneType(maker, fieldDecl.vartype, source.get(), source.getContext());
+		JCExpression pType = cloneType(maker, fieldDecl.vartype, source);
 		JCVariableDecl param = maker.VarDef(maker.Modifiers(flags, annsOnParam), fieldDecl.name, pType, null);
 		
 		if (!makeAbstract) {
@@ -289,7 +284,7 @@ public class HandleWith extends JavacAnnotationHandler<With> {
 		
 		if (makeAbstract) access = access | Flags.ABSTRACT;
 		JCMethodDecl decl = recursiveSetGeneratedBy(maker.MethodDef(maker.Modifiers(access, annsOnMethod), methodName, returnType,
-			methodGenericParams, parameters, throwsClauses, methodBody, annotationMethodDefaultValue), source.get(), field.getContext());
+			methodGenericParams, parameters, throwsClauses, methodBody, annotationMethodDefaultValue), source);
 		copyJavadoc(field, decl, CopyJavadoc.WITH);
 		return decl;
 	}

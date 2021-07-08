@@ -230,9 +230,7 @@ ul.dropdown-menu .header {
 }
 
 div.snippet code {
-	padding: 0 0 0 2rem;
 	display: inline-block;
-	text-indent: -2rem;
 	word-break: break-word;
 }
 
@@ -268,6 +266,10 @@ ol.snippet.oneliner li:before {
 
 ol.snippet.cmd li:before {
 	content: ">\A0\A0";
+}
+
+ol.snippet li.continued {
+	padding-left: 2em;
 }
 
 .fork-me {

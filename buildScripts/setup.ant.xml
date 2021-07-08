@@ -1,5 +1,5 @@
 <!--
- Copyright (C) 2020 The Project Lombok Authors.
+ Copyright (C) 2020-2021 The Project Lombok Authors.
   
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -24,19 +24,22 @@
 This buildfile is part of projectlombok.org. It sets up the build itself.
 	</description>
 	
+	<!-- increment this number to force a clean of the 'build' dir -->
+	<property name="build.version" value="2021-03-18_001" />
+	
 	<property name="pattern.jdk11plus" value="^(\d\d\d+|1[1-9]|[2-9]\d)(\..*)?$" />
 	<property name="ivy.retrieve.pattern" value="lib/[conf]/[organisation]-[artifact].[ext]" />
 	<property environment="env" />
 	<available file="lib/ivyplusplus.jar" property="ivyplusplus.available" />
 	
-	<property name="jdk-rt.loc" location="lib/openjdk6_rt.jar" />
+	<property name="jdk6-rt.loc" location="lib/openjdk6_rt.jar" />
 	<property name="jdk8-rt.loc" location="lib/openjdk8_rt.jar" />
-	<available file="${jdk-rt.loc}" property="jdk-rt.available" />
+	<available file="${jdk6-rt.loc}" property="jdk6-rt.available" />
 	<available file="${jdk8-rt.loc}" property="jdk8-rt.available" />
 	<property name="ssh.configuration.file" location="ssh.configuration" />
 	
 	<target name="-setup.ssh.ask">
-		<propertyfile file="${ssh.configuration.file}" />
+		<property file="${ssh.configuration.file}" />
 		<fail>
 			Your ssh.configuration file is corrupted; delete it and rerun this script.
 			<condition>
@@ -84,6 +87,37 @@ This buildfile is part of projectlombok.org. It sets up the build itself.
 	
 	<target name="setup.ssh" depends="-setup.ssh.ask, -setup.ssh.save" />
 	
+	<target name="-autoclean.check">
+		<available type="dir" file="build" property="existingbuild.present" />
+		<loadresource property="existingbuild.ver">
+			<first count="1">
+				<resources>
+					<restrict>
+						<fileset dir="." includes="build/build-ver.txt" />
+						<exists />
+					</restrict>
+					<string>0</string>
+				</resources>
+			</first>
+		</loadresource>
+		<condition property="existingbuild.mismatch">
+			<and>
+				<isset property="existingbuild.present" />
+				<not><equals arg1="${existingbuild.ver}" arg2="${build.version}" trim="true" /></not>
+			</and>
+		</condition>
+	</target>
+	
+	<target name="autoclean" depends="-autoclean.check" if="existingbuild.mismatch" description="Checks if a change in the build or deplist neccessitates a clean">
+		<echo>build ver has been incremented, neccessitating a clean...</echo>
+		<delete dir="build" />
+	</target>
+	
+	<target name="-setup.build" depends="autoclean">
+		<mkdir dir="build" />
+		<echo file="build/build-ver.txt">${build.version}</echo>
+	</target>
+	
 	<target name="clean" description="Removes all generated files.">
 		<delete dir="build" quiet="true" />
 	</target>
@@ -106,7 +140,7 @@ This buildfile is part of projectlombok.org. It sets up the build itself.
 	
 	<target name="-ipp.load" depends="-ipp.download">
 		<taskdef classpath="lib/ivyplusplus.jar" resource="com/zwitserloot/ivyplusplus/antlib.xml" uri="antlib:com.zwitserloot.ivyplusplus" />
-		<ivy:ensureippversion version="1.36" property="ivyplusplus.minimumAvailable" />
+		<ivy:ensureippversion version="1.40" property="ivyplusplus.minimumAvailable" />
 	</target>
 	
 	<target name="-ipp.redownload" unless="ivyplusplus.minimumAvailable">
@@ -121,10 +155,10 @@ This buildfile is part of projectlombok.org. It sets up the build itself.
 		<property name="ivy.config" value="true" />
 	</target>
 	
-	<target name="deps.jdk6-runtime" unless="jdk-rt.available">
+	<target name="deps.jdk6-runtime" unless="jdk6-rt.available">
 		<echo>To ensure stable builds and avoid accessing API that was not available in JDK6, most of lombok is set up to build against OpenJDK6's runtime, which will now be downloaded...</echo>
 		<mkdir dir="lib" />
-		<get src="https://projectlombok.org/ivyrepo/langtools/rt-openjdk6.jar" dest="${jdk-rt.loc}" verbose="true" usetimestamp="true" />
+		<get src="https://projectlombok.org/ivyrepo/langtools/rt-openjdk6.jar" dest="${jdk6-rt.loc}" verbose="true" usetimestamp="true" />
 	</target>
 	
 	<target name="deps.jdk8-runtime" unless="jdk8-rt.available">
@@ -133,7 +167,7 @@ This buildfile is part of projectlombok.org. It sets up the build itself.
 		<get src="https://projectlombok.org/ivyrepo/langtools/rt-openjdk8.jar" dest="${jdk8-rt.loc}" verbose="true" usetimestamp="true" />
 	</target>
 	
-	<target name="deps.jdk-runtime" depends="deps.jdk6-runtime" />
+	<target name="deps.jdk-runtime" depends="deps.jdk6-runtime, deps.jdk8-runtime" />
 	
 	<target name="deps.custom" depends="ivy.config" description="Download the dependencies that comprise a configuration (from ivy.xml)">
 		<fail unless="deps.conf">Supply ant with -Ddeps.conf=confname to pick the configuration you want to fetch</fail>
@@ -141,11 +175,25 @@ This buildfile is part of projectlombok.org. It sets up the build itself.
 		<ivy:retrieve symlink="true" />
 	</target>
 	
-	<target name="-deps.javac" depends="ivy.config">
-		<ivy:resolve file="buildScripts/ivy.xml" refresh="true" conf="javac${javac.wanted}" />
-		<ivy:retrieve symlink="true" />
-		<ivy:cachepath pathid="cp.javac${javac.wanted}" conf="javac${javac.wanted}" />
-	</target>
+	<macrodef name="fetchdep.ecj">
+		<attribute name="version" />
+		<sequential>
+			<ivy:resolve file="buildScripts/ivy.xml" refresh="true" conf="ecj@{version}" />
+			<ivy:retrieve symlink="true" />
+			<ivy:cachepath pathid="cp.ecj@{version}" conf="ecj@{version}" />
+			<property name="cp.ecj@{version}" refid="cp.ecj@{version}" />
+		</sequential>
+	</macrodef>
+	
+	<macrodef name="fetchdep.eclipse">
+		<attribute name="version" />
+		<sequential>
+			<ivy:resolve file="buildScripts/ivy.xml" refresh="true" conf="eclipse-@{version}" />
+			<ivy:retrieve symlink="true" />
+			<ivy:cachepath pathid="cp.eclipse-@{version}" conf="eclipse-@{version}" />
+			<property name="cp.eclipse-@{version}" refid="cp.eclipse-@{version}" />
+		</sequential>
+	</macrodef>
 	
 	<target name="deps" depends="ivy.config, deps.jdk-runtime" description="Downloads all dependencies needed for common tasks">
 		<ivy:resolve file="buildScripts/ivy.xml" refresh="true" conf="javac6,javac8,ecj8,build,eclipse-oxygen,mapstruct,sources,stripe,buildtools,test" />
@@ -155,7 +203,6 @@ This buildfile is part of projectlombok.org. It sets up the build itself.
 		<ivy:cachepath pathid="cp.ecj8" conf="ecj8" />
 		<ivy:cachepath pathid="cp.build" conf="build" />
 		<ivy:cachepath pathid="cp.eclipse-oxygen" conf="eclipse-oxygen" />
-		<ivy:cachepath pathid="cp.eclipse-202006" conf="eclipse-202006" />
 		<ivy:cachepath pathid="cp.mapstruct" conf="mapstruct" />
 		<ivy:cachepath pathid="cp.stripe" conf="stripe" />
 		<ivy:cachepath pathid="cp.buildtools" conf="buildtools" />

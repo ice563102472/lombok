@@ -1,6 +1,4 @@
 //skip-idempotent
-import lombok.Builder;
-@Builder
 public class BuilderDefaultsWarnings {
 	long x = System.currentTimeMillis();
 	final int y = 5;
@@ -23,11 +21,17 @@ public class BuilderDefaultsWarnings {
 		@java.lang.SuppressWarnings("all")
 		BuilderDefaultsWarningsBuilder() {
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public BuilderDefaultsWarnings.BuilderDefaultsWarningsBuilder x(final long x) {
 			this.x = x;
 			return this;
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public BuilderDefaultsWarnings.BuilderDefaultsWarningsBuilder z(final int z) {
 			this.z = z;
@@ -81,7 +85,6 @@ public class BuilderDefaultsWarnings {
 }
 class NoBuilderButHasDefaults {
 	private final long z = 5;
-	@Builder
 	public NoBuilderButHasDefaults() {
 	}
 	@java.lang.SuppressWarnings("all")

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2020 The Project Lombok Authors.
+ * Copyright (C) 2015-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,6 +68,7 @@ import lombok.core.SpiLoadUtil;
 import lombok.core.TypeLibrary;
 import lombok.core.configuration.CheckerFrameworkVersion;
 import lombok.eclipse.EclipseNode;
+import lombok.eclipse.handlers.HandleBuilder.BuilderJob;
 
 public class EclipseSingularsRecipes {
 	public interface TypeReferenceMaker {
@@ -258,20 +259,20 @@ public class EclipseSingularsRecipes {
 		 * If you need more control over the return type and value, use
 		 * {@link #generateMethods(SingularData, boolean, EclipseNode, boolean, TypeReferenceMaker, StatementMaker)}.
 		 */
-		public void generateMethods(CheckerFrameworkVersion cfv, SingularData data, boolean deprecate, final EclipseNode builderType, boolean fluent, final boolean chain, AccessLevel access) {
+		public void generateMethods(final BuilderJob job, SingularData data, boolean deprecate) {
 			TypeReferenceMaker returnTypeMaker = new TypeReferenceMaker() {
 				@Override public TypeReference make() {
-					return chain ? cloneSelfType(builderType) : TypeReference.baseTypeReference(TypeIds.T_void, 0);
+					return job.oldChain ? cloneSelfType(job.builderType) : TypeReference.baseTypeReference(TypeIds.T_void, 0);
 				}
 			};
 			
 			StatementMaker returnStatementMaker = new StatementMaker() {
 				@Override public ReturnStatement make() {
-					return chain ? new ReturnStatement(new ThisReference(0, 0), 0, 0) : null;
+					return job.oldChain ? new ReturnStatement(new ThisReference(0, 0), 0, 0) : null;
 				}
 			};
 			
-			generateMethods(cfv, data, deprecate, builderType, fluent, returnTypeMaker, returnStatementMaker, access);
+			generateMethods(job.checkerFramework, data, deprecate, job.builderType, job.oldFluent, returnTypeMaker, returnStatementMaker, job.accessInners);
 		}
 		
 		/**
@@ -450,7 +451,17 @@ public class EclipseSingularsRecipes {
 			statements.add(0, nullCheck);
 		}
 		
+		protected abstract int getTypeArgumentsCount();
+		
 		protected abstract char[][] getEmptyMakerReceiver(String targetFqn);
 		protected abstract char[] getEmptyMakerSelector(String targetFqn);
+		
+		public MessageSend getEmptyExpression(String targetFqn, SingularData data, EclipseNode typeNode, ASTNode source) {
+			MessageSend send = new MessageSend();
+			send.receiver = generateQualifiedNameRef(source, getEmptyMakerReceiver(targetFqn));
+			send.selector = getEmptyMakerSelector(targetFqn);
+			send.typeArguments = createTypeArgs(getTypeArgumentsCount(), false, typeNode, data.getTypeArgs());
+			return send;
+		}
 	}
 }

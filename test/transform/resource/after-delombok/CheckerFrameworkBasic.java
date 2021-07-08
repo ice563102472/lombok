@@ -1,13 +1,8 @@
+//version 8:
 class CheckerFrameworkBasic {
 	private final int x;
 	private final int y;
 	private int z;
-	@org.checkerframework.common.aliasing.qual.Unique
-	@java.lang.SuppressWarnings("all")
-	public CheckerFrameworkBasic(final int x, final int y) {
-		this.x = x;
-		this.y = y;
-	}
 	@org.checkerframework.dataflow.qual.Pure
 	@java.lang.SuppressWarnings("all")
 	public int getX() {
@@ -23,7 +18,10 @@ class CheckerFrameworkBasic {
 	public int getZ() {
 		return this.z;
 	}
-	@org.checkerframework.checker.builder.qual.ReturnsReceiver
+	/**
+	 * @return {@code this}.
+	 */
+	@org.checkerframework.common.returnsreceiver.qual.This
 	@java.lang.SuppressWarnings("all")
 	public CheckerFrameworkBasic setZ(final int z) {
 		this.z = z;
@@ -64,6 +62,15 @@ class CheckerFrameworkBasic {
 	public java.lang.String toString() {
 		return "CheckerFrameworkBasic(x=" + this.getX() + ", y=" + this.getY() + ", z=" + this.getZ() + ")";
 	}
+	@java.lang.SuppressWarnings("all")
+	public CheckerFrameworkBasic(final int x, final int y, final int z) {
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
+	/**
+	 * @return {@code this}.
+	 */
 	@org.checkerframework.dataflow.qual.SideEffectFree
 	@java.lang.SuppressWarnings("all")
 	public CheckerFrameworkBasic withX(final int x) {

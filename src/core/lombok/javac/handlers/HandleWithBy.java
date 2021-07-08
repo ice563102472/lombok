@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Project Lombok Authors.
+ * Copyright (C) 2020-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,13 +41,10 @@ import lombok.javac.JavacNode;
 import lombok.javac.JavacTreeMaker;
 import lombok.javac.JavacTreeMaker.TypeTag;
 import lombok.javac.handlers.JavacHandlerUtil.CopyJavadoc;
-
-import org.mangosdk.spi.ProviderFor;
+import lombok.spi.Provides;
 
 import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
@@ -67,7 +64,7 @@ import com.sun.tools.javac.util.Name;
 /**
  * Handles the {@code lombok.With} annotation for javac.
  */
-@ProviderFor(JavacAnnotationHandler.class)
+@Provides
 public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 	public void generateWithByForType(JavacNode typeNode, JavacNode errorNode, AccessLevel level, boolean checkForTypeLevelWithBy) {
 		if (checkForTypeLevelWithBy) {
@@ -126,7 +123,6 @@ public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 	@Override public void handle(AnnotationValues<WithBy> annotation, JCAnnotation ast, JavacNode annotationNode) {
 		handleExperimentalFlagUsage(annotationNode, ConfigurationKeys.WITHBY_FLAG_USAGE, "@WithBy");
 		
-		Collection<JavacNode> fields = annotationNode.upFromAnnotationToFields();
 		deleteAnnotationIfNeccessary(annotationNode, WithBy.class);
 		deleteImportFromCompilationUnit(annotationNode, "lombok.AccessLevel");
 		JavacNode node = annotationNode.up();
@@ -138,7 +134,7 @@ public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 		
 		switch (node.getKind()) {
 		case FIELD:
-			createWithByForFields(level, fields, annotationNode, true, onMethod);
+			createWithByForFields(level, annotationNode.upFromAnnotationToFields(), annotationNode, true, onMethod);
 			break;
 		case TYPE:
 			if (!onMethod.isEmpty()) annotationNode.addError("'onMethod' is not supported for @WithBy on a type.");
@@ -206,10 +202,8 @@ public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 		long access = toJavacModifier(level);
 		
 		JCMethodDecl createdWithBy = createWithBy(access, fieldNode, fieldNode.getTreeMaker(), source, onMethod, makeAbstract);
-		ClassSymbol sym = ((JCClassDecl) fieldNode.up().get()).sym;
-		Type returnType = sym == null ? null : sym.type;
-		
-		injectMethod(typeNode, createdWithBy, List.<Type>of(getMirrorForFieldType(fieldNode)), returnType);
+		recursiveSetGeneratedBy(createdWithBy, source);
+		injectMethod(typeNode, createdWithBy);
 	}
 	
 	private static final LombokImmutableList<String> NAME_JUF_FUNCTION = LombokImmutableList.of("java", "util", "function", "Function");
@@ -265,7 +259,7 @@ public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 		}
 		if (functionalInterfaceName == null) {
 			functionalInterfaceName = NAME_JUF_FUNCTION;
-			parameterizer = cloneType(maker, fieldDecl.vartype, source.get(), field.getContext());
+			parameterizer = cloneType(maker, fieldDecl.vartype, source);
 		}
 		if (functionalInterfaceName == NAME_JUF_INTOP) applyMethodName = "applyAsInt";
 		if (functionalInterfaceName == NAME_JUF_LONGOP) applyMethodName = "applyAsLong";
@@ -274,7 +268,7 @@ public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 		JCExpression varType = chainDots(field, functionalInterfaceName);
 		if (parameterizer != null && superExtendsStyle) {
 			JCExpression parameterizer1 = parameterizer;
-			JCExpression parameterizer2 = cloneType(maker, parameterizer, source.get(), field.getContext());
+			JCExpression parameterizer2 = cloneType(maker, parameterizer, source);
 			// TODO: Apply copyable annotations to 'parameterizer' and 'parameterizer2'.
 			JCExpression arg1 = maker.Wildcard(maker.TypeBoundKind(BoundKind.SUPER), parameterizer1);
 			JCExpression arg2 = maker.Wildcard(maker.TypeBoundKind(BoundKind.EXTENDS), parameterizer2);
@@ -334,7 +328,7 @@ public class HandleWithBy extends JavacAnnotationHandler<WithBy> {
 		if (makeAbstract) access = access | Flags.ABSTRACT;
 		createRelevantNonNullAnnotation(source, param);
 		JCMethodDecl decl = recursiveSetGeneratedBy(maker.MethodDef(maker.Modifiers(access, annsOnMethod), methodName, returnType,
-			methodGenericParams, parameters, throwsClauses, methodBody, annotationMethodDefaultValue), source.get(), field.getContext());
+			methodGenericParams, parameters, throwsClauses, methodBody, annotationMethodDefaultValue), source);
 		copyJavadoc(field, decl, CopyJavadoc.WITH_BY);
 		createRelevantNonNullAnnotation(source, decl);
 		return decl;

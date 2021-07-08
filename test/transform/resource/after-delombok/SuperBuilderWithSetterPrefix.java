@@ -35,27 +35,39 @@ public class SuperBuilderWithSetterPrefix {
 				b.withObtainViaField(instance.field1);
 				b.withObtainViaMethod(instance.method());
 				b.withObtainViaStaticMethod(SuperBuilderWithSetterPrefix.Parent.staticMethod(instance));
-				b.withItems(instance.items == null ? java.util.Collections.emptyList() : instance.items);
+				b.withItems(instance.items == null ? java.util.Collections.<String>emptyList() : instance.items);
 			}
 			@java.lang.SuppressWarnings("all")
 			protected abstract B self();
 			@java.lang.SuppressWarnings("all")
 			public abstract C build();
+			/**
+			 * @return {@code this}.
+			 */
 			@java.lang.SuppressWarnings("all")
 			public B withField1(final int field1) {
 				this.field1 = field1;
 				return self();
 			}
+			/**
+			 * @return {@code this}.
+			 */
 			@java.lang.SuppressWarnings("all")
 			public B withObtainViaField(final int obtainViaField) {
 				this.obtainViaField = obtainViaField;
 				return self();
 			}
+			/**
+			 * @return {@code this}.
+			 */
 			@java.lang.SuppressWarnings("all")
 			public B withObtainViaMethod(final int obtainViaMethod) {
 				this.obtainViaMethod = obtainViaMethod;
 				return self();
 			}
+			/**
+			 * @return {@code this}.
+			 */
 			@java.lang.SuppressWarnings("all")
 			public B withObtainViaStaticMethod(final String obtainViaStaticMethod) {
 				this.obtainViaStaticMethod = obtainViaStaticMethod;
@@ -154,6 +166,9 @@ public class SuperBuilderWithSetterPrefix {
 			@java.lang.Override
 			@java.lang.SuppressWarnings("all")
 			public abstract C build();
+			/**
+			 * @return {@code this}.
+			 */
 			@java.lang.SuppressWarnings("all")
 			public B setField3(final double field3) {
 				this.field3 = field3;

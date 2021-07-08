@@ -75,6 +75,12 @@ public class Javac {
 	
 	private static final AtomicInteger compilerVersion = new AtomicInteger(-1);
 	
+	/* This section includes flags that would ordinarily be in Flags, but which are 'too new' (we don't compile against older versions of javac for compatibility). */
+	public static final long RECORD = 1L << 61; // ClassSymbols, MethodSymbols, VarSymbols (Marks types as being records, as well as the 'fields' in the compact declaration, and the canonical constructor)
+	public static final long COMPACT_RECORD_CONSTRUCTOR = 1L << 51; // MethodSymbols (the 'implicit' many-args constructor that records have)
+	public static final long UNINITIALIZED_FIELD = 1L << 51; // VarSymbols (To identify fields that the compact record constructor won't initialize)
+	public static final long GENERATED_MEMBER = 1L << 24; // MethodSymbols, VarSymbols (marks methods and the constructor generated in records)
+	
 	/**
 	 * Returns the version of this java compiler, i.e. the JDK that it shipped in. For example, for javac v1.7, this returns {@code 7}.
 	 */
@@ -254,6 +260,9 @@ public class Javac {
 		}
 	}
 	
+	/**
+	 * In some versions, the field's type is {@code JCTree}, in others it is {@code JCExpression}, which at the JVM level are not the same.
+	 */
 	public static JCTree getExtendsClause(JCClassDecl decl) {
 		try {
 			return (JCTree) getExtendsClause.invoke(decl);
@@ -279,8 +288,20 @@ public class Javac {
 		return null;
 	}
 	
+	/**
+	 * Checks if the javadoc comment associated with {@code tree} has a position set.
+	 * 
+	 * Returns true if there is no javadoc comment on the node, or it has position (position isn't -1).
+	 */
+	public static boolean validateDocComment(JCCompilationUnit cu, JCTree tree) {
+		Object dc = getDocComments(cu);
+		if (!instanceOfDocCommentTable(dc)) return true;
+		return JavadocOps_8.validateJavadoc(dc, tree);
+	}
+	
 	@SuppressWarnings("unchecked")
 	public static void setDocComment(JCCompilationUnit cu, JCTree node, String javadoc) {
+		if (javadoc == null) return;
 		Object dc = getDocComments(cu);
 		if (dc instanceof Map) {
 			((Map<JCTree, String>) dc).put(node, javadoc);
@@ -301,6 +322,12 @@ public class Javac {
 			return javadoc.getText();
 		}
 		
+		public static boolean validateJavadoc(Object dc, JCTree node) {
+			DocCommentTable dct = (DocCommentTable) dc;
+			Comment javadoc = dct.getComment(node);
+			return javadoc == null || javadoc.getText() == null || javadoc.getSourcePos(0) >= 0;
+		}
+		
 		static void setJavadoc(Object dc, JCTree node, String javadoc) {
 			DocCommentTable dct = (DocCommentTable) dc;
 			Comment newCmt = createJavadocComment(javadoc, node);
@@ -314,7 +341,7 @@ public class Javac {
 				}
 				
 				@Override public int getSourcePos(int index) {
-					return -1;
+					return field == null ? -1 : field.getStartPosition();
 				}
 				
 				@Override public CommentStyle getStyle() {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2019 The Project Lombok Authors.
+ * Copyright (C) 2010-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,11 +35,13 @@ import org.eclipse.jdt.internal.compiler.ast.FunctionalExpression;
 import org.eclipse.jdt.internal.compiler.ast.ImportReference;
 import org.eclipse.jdt.internal.compiler.ast.LambdaExpression;
 import org.eclipse.jdt.internal.compiler.ast.LocalDeclaration;
+import org.eclipse.jdt.internal.compiler.ast.MessageSend;
 import org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.SingleTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
+import org.eclipse.jdt.internal.compiler.impl.Constant;
 import org.eclipse.jdt.internal.compiler.impl.ReferenceContext;
 import org.eclipse.jdt.internal.compiler.lookup.ArrayBinding;
 import org.eclipse.jdt.internal.compiler.lookup.Binding;
@@ -66,32 +68,7 @@ public class PatchVal {
 	// This is half of the work for 'val' support - the other half is in PatchValEclipse. This half is enough for ecj.
 	// Creates a copy of the 'initialization' field on a LocalDeclaration if the type of the LocalDeclaration is 'val', because the completion parser will null this out,
 	// which in turn stops us from inferring the intended type for 'val x = 5;'. We look at the copy.
-	// Also patches local declaration to not call .resolveType() on the initializer expression if we've already done so (calling it twice causes weird errors),
-	// and patches .resolve() on LocalDeclaration itself to just-in-time replace the 'val' vartype with the right one.
-	
-	public static TypeBinding skipResolveInitializerIfAlreadyCalled(Expression expr, BlockScope scope) {
-		if (expr.resolvedType != null) return expr.resolvedType;
-		try {
-			return expr.resolveType(scope);
-		} catch (NullPointerException e) {
-			return null;
-		} catch (ArrayIndexOutOfBoundsException e) {
-			// This will occur internally due to for example 'val x = mth("X");', where mth takes 2 arguments.
-			return null;
-		}
-	}
-	
-	public static TypeBinding skipResolveInitializerIfAlreadyCalled2(Expression expr, BlockScope scope, LocalDeclaration decl) {
-		if (decl != null && LocalDeclaration.class.equals(decl.getClass()) && expr.resolvedType != null) return expr.resolvedType;
-		try {
-			return expr.resolveType(scope);
-		} catch (NullPointerException e) {
-			return null;
-		} catch (ArrayIndexOutOfBoundsException e) {
-			// This will occur internally due to for example 'val x = mth("X");', where mth takes 2 arguments.
-			return null;
-		}
-	}
+	// Also patches .resolve() on LocalDeclaration itself to just-in-time replace the 'val' vartype with the right one.
 	
 	public static boolean matches(String key, char[] array) {
 		if (array == null || key.length() != array.length) return false;
@@ -143,7 +120,7 @@ public class PatchVal {
 	public static boolean couldBe(ImportReference[] imports, String key, TypeReference ref) {
 		String[] keyParts = key.split("\\.");
 		if (ref instanceof SingleTypeReference) {
-			char[] token = ((SingleTypeReference)ref).token;
+			char[] token = ((SingleTypeReference) ref).token;
 			if (!matches(keyParts[keyParts.length - 1], token)) return false;
 			if (imports == null) return true;
 			top:
@@ -163,7 +140,7 @@ public class PatchVal {
 		}
 		
 		if (ref instanceof QualifiedTypeReference) {
-			char[][] tokens = ((QualifiedTypeReference)ref).tokens;
+			char[][] tokens = ((QualifiedTypeReference) ref).tokens;
 			if (keyParts.length != tokens.length) return false;
 			for(int i = 0; i < tokens.length; ++i) {
 				String part = keyParts[i];
@@ -227,14 +204,16 @@ public class PatchVal {
 		boolean var = isVar(local, scope);
 		if (!(val || var)) return false;
 		
-		StackTraceElement[] st = new Throwable().getStackTrace();
-		for (int i = 0; i < st.length - 2 && i < 10; i++) {
-			if (st[i].getClassName().equals("lombok.launch.PatchFixesHider$Val")) {
-				boolean valInForStatement = val &&
-					st[i + 1].getClassName().equals("org.eclipse.jdt.internal.compiler.ast.LocalDeclaration") &&
-					st[i + 2].getClassName().equals("org.eclipse.jdt.internal.compiler.ast.ForStatement");
-				if (valInForStatement) return false;
-				break;
+		if (val) {
+			StackTraceElement[] st = new Throwable().getStackTrace();
+			for (int i = 0; i < st.length - 2 && i < 10; i++) {
+				if (st[i].getClassName().equals("lombok.launch.PatchFixesHider$Val")) {
+					boolean valInForStatement = 
+						st[i + 1].getClassName().equals("org.eclipse.jdt.internal.compiler.ast.LocalDeclaration") &&
+						st[i + 2].getClassName().equals("org.eclipse.jdt.internal.compiler.ast.ForStatement");
+					if (valInForStatement) return false;
+					break;
+				}
 			}
 		}
 		
@@ -264,6 +243,7 @@ public class PatchVal {
 			}
 			
 			TypeBinding resolved = null;
+			Constant oldConstant = init.constant;
 			try {
 				resolved = decomponent ? getForEachComponentType(init, scope) : resolveForExpression(init, scope);
 			} catch (NullPointerException e) {
@@ -280,13 +260,16 @@ public class PatchVal {
 				} catch (Exception e) {
 					// Some type thing failed.
 				}
+			} else {
+				if (init instanceof MessageSend && ((MessageSend) init).actualReceiverType == null) {
+					init.constant = oldConstant;
+				}
 			}
 		}
 		
 		if (val) local.modifiers |= ClassFileConstants.AccFinal;
 		local.annotations = addValAnnotation(local.annotations, local.type, scope);
 		local.type = replacement != null ? replacement : new QualifiedTypeReference(TypeConstants.JAVA_LANG_OBJECT, poss(local.type, 3));
-		
 		return false;
 	}
 	

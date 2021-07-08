@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2020 The Project Lombok Authors.
+ * Copyright (C) 2011-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,10 +25,13 @@ import static lombok.javac.Javac.*;
 import static lombok.javac.JavacTreeMaker.TypeTag.typeTag;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 import javax.lang.model.type.TypeKind;
 import javax.tools.JavaFileObject;
@@ -40,8 +43,10 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 import com.sun.tools.javac.code.Type.CapturedType;
 import com.sun.tools.javac.code.Type.ClassType;
+import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.code.Type.WildcardType;
 import com.sun.tools.javac.code.Types;
+import com.sun.tools.javac.comp.ArgumentAttr;
 import com.sun.tools.javac.comp.Attr;
 import com.sun.tools.javac.comp.AttrContext;
 import com.sun.tools.javac.comp.Enter;
@@ -59,16 +64,28 @@ import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Log;
+import com.sun.tools.javac.util.Name;
 
-import lombok.Lombok;
 import lombok.core.debug.AssertionLogger;
 import lombok.permit.Permit;
 
 public class JavacResolution {
+	private final Context context;
 	private final Attr attr;
 	private final CompilerMessageSuppressor messageSuppressor;
 	
+	private static final Method isLocal;
+	
+	static {
+		Method local = Permit.permissiveGetMethod(TypeSymbol.class, "isLocal");
+		if (local == null) {
+			local = Permit.permissiveGetMethod(TypeSymbol.class, "isDirectlyOrIndirectlyLocal");
+		}
+		isLocal = local;
+	}
+	
 	public JavacResolution(Context context) {
+		this.context = context;
 		attr = Attr.instance(context);
 		messageSuppressor = new CompilerMessageSuppressor(context);
 	}
@@ -232,10 +249,19 @@ public class JavacResolution {
 		} catch (Throwable ignore) {
 			// This addresses issue #1553 which involves JDK9; if it doesn't exist, we probably don't need to set it.
 		}
-		if (tree instanceof JCBlock) attr.attribStat(tree, env);
-		else if (tree instanceof JCMethodDecl) attr.attribStat(((JCMethodDecl) tree).body, env);
-		else if (tree instanceof JCVariableDecl) attr.attribStat(tree, env);
-		else throw new IllegalStateException("Called with something that isn't a block, method decl, or variable decl");
+		
+		Map<?,?> cache = null;
+		try {
+			cache = ArgumentAttrReflect.enableTempCache(context);
+			
+			if (tree instanceof JCBlock) attr.attribStat(tree, env);
+			else if (tree instanceof JCMethodDecl) attr.attribStat(((JCMethodDecl) tree).body, env);
+			else if (tree instanceof JCVariableDecl) attr.attribStat(tree, env);
+			else throw new IllegalStateException("Called with something that isn't a block, method decl, or variable decl");
+		} finally {
+			ArgumentAttrReflect.restoreCache(cache, context);
+		}
+		
 	}
 	
 	public static class TypeNotConvertibleException extends Exception {
@@ -246,27 +272,64 @@ public class JavacResolution {
 	
 	private static class ReflectiveAccess {
 		private static Method UPPER_BOUND;
+		private static Throwable initError;
 		
 		static {
 			Method upperBound = null;
 			try {
 				upperBound = Permit.getMethod(Types.class, "upperBound", Type.class);
-			} catch (Throwable ignore) {}
+			} catch (Throwable e) {
+				initError = e;
+			}
+			
 			if (upperBound == null) try {
 				upperBound = Permit.getMethod(Types.class, "wildUpperBound", Type.class);
-			} catch (Throwable ignore) {}
+			} catch (Throwable e) {
+				initError = e;
+			}
 			
 			UPPER_BOUND = upperBound;
 		}
 		
 		public static Type Types_upperBound(Types types, Type type) {
-			try {
-				return (Type) UPPER_BOUND.invoke(types, type);
-			} catch (InvocationTargetException e) {
-				throw Lombok.sneakyThrow(e.getCause());
-			} catch (Exception e) {
-				throw Lombok.sneakyThrow(e);
+			return (Type) Permit.invokeSneaky(initError, UPPER_BOUND, types, type);
+		}
+	}
+	
+	/**
+	 * ArgumentAttr was added in Java 9 and caches some method arguments. Lombok should cleanup its changes after resolution.
+	 */
+	private static class ArgumentAttrReflect {
+		private static Field ARGUMENT_TYPE_CACHE;
+		
+		static {
+			if (Javac.getJavaCompilerVersion() >= 9) {
+				try {
+					ARGUMENT_TYPE_CACHE = Permit.getField(ArgumentAttr.class, "argumentTypeCache");
+				} catch (Exception ignore) {}
 			}
+		}
+		
+		public static Map<?, ?> enableTempCache(Context context) {
+			if (ARGUMENT_TYPE_CACHE == null) return null;
+			
+			ArgumentAttr argumentAttr = ArgumentAttr.instance(context);
+			try {
+				Map<?, ?> cache = (Map<?, ?>) Permit.get(ARGUMENT_TYPE_CACHE, argumentAttr);
+				Permit.set(ARGUMENT_TYPE_CACHE, argumentAttr, new LinkedHashMap<Object, Object>(cache));
+				return cache;
+			} catch (Exception ignore) { }
+			
+			return null;
+		}
+		
+		public static void restoreCache(Map<?, ?> cache, Context context) {
+			if (ARGUMENT_TYPE_CACHE == null) return;
+			
+			ArgumentAttr argumentAttr = ArgumentAttr.instance(context);
+			try {
+				Permit.set(ARGUMENT_TYPE_CACHE, argumentAttr, cache);
+			} catch (Exception ignore) { }
 		}
 	}
 	
@@ -314,6 +377,50 @@ public class JavacResolution {
 		return result;
 	}
 	
+	private static Iterable<? extends Type> concat(final Type t, final Collection<? extends Type> ts) {
+		if (t == null) return ts;
+		
+		return new Iterable<Type>() {
+			@Override public Iterator<Type> iterator() {
+				return new Iterator<Type>() {
+					private boolean first = true;
+					private Iterator<? extends Type> wrap = ts == null ? null : ts.iterator();
+					@Override public boolean hasNext() {
+						if (first) return true;
+						if (wrap == null) return false;
+						return wrap.hasNext();
+					}
+					
+					@Override public Type next() {
+						if (first) {
+							first = false;
+							return t;
+						}
+						if (wrap == null) throw new NoSuchElementException();
+						return wrap.next();
+					}
+					
+					@Override public void remove() {
+						throw new UnsupportedOperationException();
+					}
+				};
+			}
+		};
+	}
+	
+	private static int compare(Name a, Name b) {
+		return a.compareTo(b);
+	}
+	
+	private static boolean isLocalType(TypeSymbol symbol) {
+		try {
+			return (Boolean) Permit.invoke(isLocal, symbol);
+		}
+		catch (Exception e) {
+			return false;
+		}
+	}
+	
 	private static JCExpression typeToJCTree0(Type type, JavacAST ast, boolean allowCompound, boolean allowVoid, boolean allowCapture) throws TypeNotConvertibleException {
 		// NB: There's such a thing as maker.Type(type), but this doesn't work very well; it screws up anonymous classes, captures, and adds an extra prefix dot for some reason too.
 		//  -- so we write our own take on that here.
@@ -335,12 +442,30 @@ public class JavacResolution {
 		if (symbol.name.length() == 0) {
 			// Anonymous inner class
 			if (type instanceof ClassType) {
-				List<Type> ifaces = ((ClassType) type).interfaces_field;
+				Type winner = null;
+				int winLevel = 0; // 100 = array, 50 = class, 20 = typevar, 15 = wildcard, 10 = interface, 1 = Object.
 				Type supertype = ((ClassType) type).supertype_field;
-				if (isObject(supertype) && ifaces != null && ifaces.length() > 0) {
-					return typeToJCTree(ifaces.get(0), ast, allowCompound, allowVoid, allowCapture);
+				List<Type> ifaces = ((ClassType) type).interfaces_field;
+				for (Type t : concat(supertype, ifaces)) {
+					int level = 0;
+					if (t instanceof ArrayType) level = 100;
+					else if (t instanceof TypeVar) level = 20;
+					else if (t instanceof WildcardType) level = 15;
+					else if (t.isInterface()) level = 10;
+					else if (isObject(t)) level = 1;
+					else if (t instanceof ClassType) level = 50;
+					else level = 5;
+					
+					if (winLevel > level) continue;
+					if (winLevel < level) {
+						winner = t;
+						winLevel = level;
+						continue;
+					}
+					if (compare(winner.tsym.getQualifiedName(), t.tsym.getQualifiedName()) < 0) winner = t;
 				}
-				if (supertype != null) return typeToJCTree(supertype, ast, allowCompound, allowVoid, allowCapture);
+				if (winner == null) return createJavaLangObject(ast);
+				return typeToJCTree(winner, ast, allowCompound, allowVoid, allowCapture);
 			}
 			throw new TypeNotConvertibleException("Anonymous inner class");
 		}
@@ -394,7 +519,7 @@ public class JavacResolution {
 		}
 		
 		String qName;
-		if (symbol.isLocal()) {
+		if (isLocalType(symbol)) {
 			qName = symbol.getSimpleName().toString();
 		} else if (symbol.type != null && symbol.type.getEnclosingType() != null && typeTag(symbol.type.getEnclosingType()).equals(typeTag("CLASS"))) {
 			replacement = typeToJCTree0(type.getEnclosingType(), ast, false, false, false);

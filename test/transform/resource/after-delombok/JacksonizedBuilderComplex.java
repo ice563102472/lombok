@@ -1,3 +1,4 @@
+//version 8: Jackson deps are at least Java7+.
 //CONF: lombok.builder.className = Test*Name
 import java.util.List;
 @com.fasterxml.jackson.databind.annotation.JsonDeserialize(builder = JacksonizedBuilderComplex.TestVoidName.class)
@@ -18,21 +19,33 @@ class JacksonizedBuilderComplex {
 		@java.lang.SuppressWarnings("all")
 		TestVoidName() {
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public JacksonizedBuilderComplex.TestVoidName<T> withNumber(final T number) {
 			this.number = number;
 			return this;
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public JacksonizedBuilderComplex.TestVoidName<T> withArg2(final int arg2) {
 			this.arg2 = arg2;
 			return this;
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public JacksonizedBuilderComplex.TestVoidName<T> withArg3(final String arg3) {
 			this.arg3 = arg3;
 			return this;
 		}
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public JacksonizedBuilderComplex.TestVoidName<T> withSelfRef(final JacksonizedBuilderComplex selfRef) {
 			this.selfRef = selfRef;

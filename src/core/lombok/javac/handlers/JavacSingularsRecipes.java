@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2020 The Project Lombok Authors.
+ * Copyright (C) 2015-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,6 @@ import com.sun.tools.javac.tree.JCTree.JCStatement;
 import com.sun.tools.javac.tree.JCTree.JCTypeParameter;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.tree.JCTree.JCWildcard;
-import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Name;
@@ -57,6 +56,7 @@ import lombok.core.configuration.CheckerFrameworkVersion;
 import lombok.core.handlers.HandlerUtil;
 import lombok.javac.JavacNode;
 import lombok.javac.JavacTreeMaker;
+import lombok.javac.handlers.HandleBuilder.BuilderJob;
 
 public class JavacSingularsRecipes {
 	public interface ExpressionMaker {
@@ -235,7 +235,7 @@ public class JavacSingularsRecipes {
 			return Arrays.asList(p, s);
 		}
 		
-		public abstract java.util.List<JavacNode> generateFields(SingularData data, JavacNode builderType, JCTree source);
+		public abstract java.util.List<JavacNode> generateFields(SingularData data, JavacNode builderType, JavacNode source);
 		
 		/**
 		 * Generates the singular, plural, and clear methods for the given {@link SingularData}.
@@ -243,36 +243,38 @@ public class JavacSingularsRecipes {
 		 * If you need more control over the return type and value, use
 		 * {@link #generateMethods(SingularData, boolean, JavacNode, JCTree, boolean, ExpressionMaker, StatementMaker)}.
 		 */
-		public void generateMethods(CheckerFrameworkVersion cfv, SingularData data, boolean deprecate, final JavacNode builderType, JCTree source, boolean fluent, final boolean chain, AccessLevel access) {
-			final JavacTreeMaker maker = builderType.getTreeMaker();
+		public void generateMethods(final BuilderJob job, SingularData data, boolean deprecate) {
+			//job.checkerFramework, job.builderType, job.source, job.oldFluent, job.oldChain, job.accessInners
+			//CheckerFrameworkVersion cfv, final JavacNode builderType, JavacNode source, boolean fluent, final boolean chain, AccessLevel access) {
+			final JavacTreeMaker maker = job.builderType.getTreeMaker();
 			
 			ExpressionMaker returnTypeMaker = new ExpressionMaker() { @Override public JCExpression make() {
-				return chain ? 
-					cloneSelfType(builderType) : 
-					maker.Type(createVoidType(builderType.getSymbolTable(), CTC_VOID));
+				return job.oldChain ? 
+					cloneSelfType(job.builderType) : 
+					maker.Type(createVoidType(job.builderType.getSymbolTable(), CTC_VOID));
 			}};
 			
 			StatementMaker returnStatementMaker = new StatementMaker() { @Override public JCStatement make() {
-				return chain ? maker.Return(maker.Ident(builderType.toName("this"))) : null;
+				return job.oldChain ? maker.Return(maker.Ident(job.builderType.toName("this"))) : null;
 			}};
 			
-			generateMethods(cfv, data, deprecate, builderType, source, fluent, returnTypeMaker, returnStatementMaker, access);
+			generateMethods(job.checkerFramework, data, deprecate, job.builderType, job.sourceNode, job.oldFluent, returnTypeMaker, returnStatementMaker, job.accessInners);
 		}
 		
 		/**
 		 * Generates the singular, plural, and clear methods for the given {@link SingularData}.
 		 * Uses the given {@code returnTypeMaker} and {@code returnStatementMaker} for the generated methods.
 		 */
-		public abstract void generateMethods(CheckerFrameworkVersion cfv, SingularData data, boolean deprecate, JavacNode builderType, JCTree source, boolean fluent, ExpressionMaker returnTypeMaker, StatementMaker returnStatementMaker, AccessLevel access);
+		public abstract void generateMethods(CheckerFrameworkVersion cfv, SingularData data, boolean deprecate, JavacNode builderType, JavacNode source, boolean fluent, ExpressionMaker returnTypeMaker, StatementMaker returnStatementMaker, AccessLevel access);
 		
-		protected void doGenerateMethods(CheckerFrameworkVersion cfv, SingularData data, boolean deprecate, JavacNode builderType, JCTree source, boolean fluent, ExpressionMaker returnTypeMaker, StatementMaker returnStatementMaker, AccessLevel access) {
+		protected void doGenerateMethods(CheckerFrameworkVersion cfv, SingularData data, boolean deprecate, JavacNode builderType, JavacNode source, boolean fluent, ExpressionMaker returnTypeMaker, StatementMaker returnStatementMaker, AccessLevel access) {
 			JavacTreeMaker maker = builderType.getTreeMaker();
 			generateSingularMethod(cfv, deprecate, maker, returnTypeMaker.make(), returnStatementMaker.make(), data, builderType, source, fluent, access);
 			generatePluralMethod(cfv, deprecate, maker, returnTypeMaker.make(), returnStatementMaker.make(), data, builderType, source, fluent, access);
 			generateClearMethod(cfv, deprecate, maker, returnTypeMaker.make(), returnStatementMaker.make(), data, builderType, source, access);
 		}
 		
-		private void finishAndInjectMethod(CheckerFrameworkVersion cfv, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JCTree source, boolean deprecate, ListBuffer<JCStatement> statements, Name methodName, List<JCVariableDecl> jcVariableDecls, List<JCAnnotation> methodAnnotations, AccessLevel access, Boolean ignoreNullCollections) {
+		private void finishAndInjectMethod(CheckerFrameworkVersion cfv, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JavacNode source, boolean deprecate, ListBuffer<JCStatement> statements, Name methodName, List<JCVariableDecl> jcVariableDecls, List<JCAnnotation> methodAnnotations, AccessLevel access, Boolean ignoreNullCollections) {
 			if (returnStatement != null) statements.append(returnStatement);
 			JCBlock body = maker.Block(0, statements.toList());
 			JCModifiers mods = makeMods(maker, cfv, builderType, deprecate, access, methodAnnotations);
@@ -288,15 +290,15 @@ public class JavacSingularsRecipes {
 			}
 			
 			JCMethodDecl method = maker.MethodDef(mods, methodName, returnType, typeParams, jcVariableDecls, thrown, body, null);
-			recursiveSetGeneratedBy(method, source, builderType.getContext());
 			if (returnStatement != null) createRelevantNonNullAnnotation(builderType, method);
+			recursiveSetGeneratedBy(method, source);
 			injectMethod(builderType, method);
 		}
 		
-		private void generateClearMethod(CheckerFrameworkVersion cfv, boolean deprecate, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JCTree source, AccessLevel access) {
+		private void generateClearMethod(CheckerFrameworkVersion cfv, boolean deprecate, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JavacNode source, AccessLevel access) {
 			JCStatement clearStatement = generateClearStatements(maker, data, builderType);
 			ListBuffer<JCStatement> statements = new ListBuffer<JCStatement>();
-			statements.add(clearStatement);
+			statements.append(clearStatement);
 			
 			Name methodName = builderType.toName(HandlerUtil.buildAccessorName("clear", data.getPluralName().toString()));
 			finishAndInjectMethod(cfv, maker, returnType, returnStatement, data, builderType, source, deprecate, statements, methodName, List.<JCVariableDecl>nil(), List.<JCAnnotation>nil(), access, null);
@@ -304,7 +306,7 @@ public class JavacSingularsRecipes {
 		
 		protected abstract JCStatement generateClearStatements(JavacTreeMaker maker, SingularData data, JavacNode builderType);
 		
-		private void generateSingularMethod(CheckerFrameworkVersion cfv, boolean deprecate, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JCTree source, boolean fluent, AccessLevel access) {
+		private void generateSingularMethod(CheckerFrameworkVersion cfv, boolean deprecate, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JavacNode source, boolean fluent, AccessLevel access) {
 			ListBuffer<JCStatement> statements = generateSingularMethodStatements(maker, data, builderType, source);
 			List<JCVariableDecl> params = generateSingularMethodParameters(maker, data, builderType, source);
 			Name name = data.getSingularName();
@@ -317,7 +319,7 @@ public class JavacSingularsRecipes {
 			finishAndInjectMethod(cfv, maker, returnType, returnStatement, data, builderType, source, deprecate, statements, name, params, methodAnnotations, access, null);
 		}
 		
-		protected JCVariableDecl generateSingularMethodParameter(int typeIndex, JavacTreeMaker maker, SingularData data, JavacNode builderType, JCTree source, Name name) {
+		protected JCVariableDecl generateSingularMethodParameter(int typeIndex, JavacTreeMaker maker, SingularData data, JavacNode builderType, JavacNode source, Name name) {
 			long flags = JavacHandlerUtil.addFinalIfNeeded(Flags.PARAMETER, builderType.getContext());
 			JCExpression type = cloneParamType(typeIndex, maker, data.getTypeArgs(), builderType, source);
 			List<JCAnnotation> typeUseAnns = getTypeUseAnnotations(type);
@@ -332,11 +334,11 @@ public class JavacSingularsRecipes {
 			return maker.Exec(invokeAdd);
 		}
 		
-		protected abstract ListBuffer<JCStatement> generateSingularMethodStatements(JavacTreeMaker maker, SingularData data, JavacNode builderType, JCTree source);
+		protected abstract ListBuffer<JCStatement> generateSingularMethodStatements(JavacTreeMaker maker, SingularData data, JavacNode builderType, JavacNode source);
 		
-		protected abstract List<JCVariableDecl> generateSingularMethodParameters(JavacTreeMaker maker, SingularData data, JavacNode builderType, JCTree source);
+		protected abstract List<JCVariableDecl> generateSingularMethodParameters(JavacTreeMaker maker, SingularData data, JavacNode builderType, JavacNode source);
 		
-		private void generatePluralMethod(CheckerFrameworkVersion cfv, boolean deprecate, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JCTree source, boolean fluent, AccessLevel access) {
+		private void generatePluralMethod(CheckerFrameworkVersion cfv, boolean deprecate, JavacTreeMaker maker, JCExpression returnType, JCStatement returnStatement, SingularData data, JavacNode builderType, JavacNode source, boolean fluent, AccessLevel access) {
 			ListBuffer<JCStatement> statements = generatePluralMethodStatements(maker, data, builderType, source);
 			
 			Name name = data.getPluralName();
@@ -355,7 +357,7 @@ public class JavacSingularsRecipes {
 				JCExpression incomingIsNotNull = maker.Binary(CTC_NOT_EQUAL, maker.Ident(data.getPluralName()), maker.Literal(CTC_BOT, null));
 				JCStatement onNotNull = maker.Block(0, statements.toList());
 				statements = new ListBuffer<JCStatement>();
-				statements.add(maker.If(incomingIsNotNull, onNotNull, null));
+				statements.append(maker.If(incomingIsNotNull, onNotNull, null));
 			} else {
 				statements.prepend(JavacHandlerUtil.generateNullCheck(maker, null, data.getPluralName(), builderType, "%s cannot be null"));
 			}
@@ -365,7 +367,7 @@ public class JavacSingularsRecipes {
 			finishAndInjectMethod(cfv, maker, returnType, returnStatement, data, builderType, source, deprecate, statements, name, List.of(param), methodAnnotations, access, ignoreNullCollections);
 		}
 		
-		protected ListBuffer<JCStatement> generatePluralMethodStatements(JavacTreeMaker maker, SingularData data, JavacNode builderType, JCTree source) {
+		protected ListBuffer<JCStatement> generatePluralMethodStatements(JavacTreeMaker maker, SingularData data, JavacNode builderType, JavacNode source) {
 			ListBuffer<JCStatement> statements = new ListBuffer<JCStatement>();
 			
 			JCExpression thisDotFieldDotAdd = chainDots(builderType, "this", data.getPluralName().toString(), getAddMethodName() + "All");
@@ -377,9 +379,9 @@ public class JavacSingularsRecipes {
 		
 		protected abstract JCExpression getPluralMethodParamType(JavacNode builderType);
 		
-		protected abstract JCStatement createConstructBuilderVarIfNeeded(JavacTreeMaker maker, SingularData data, JavacNode builderType, JCTree source);
+		protected abstract JCStatement createConstructBuilderVarIfNeeded(JavacTreeMaker maker, SingularData data, JavacNode builderType, JavacNode source);
 		
-		public abstract void appendBuildCode(SingularData data, JavacNode builderType, JCTree source, ListBuffer<JCStatement> statements, Name targetVariableName, String builderVariable);
+		public abstract void appendBuildCode(SingularData data, JavacNode builderType, JavacNode source, ListBuffer<JCStatement> statements, Name targetVariableName, String builderVariable);
 		
 		public boolean shadowedDuringBuild() {
 			return true;
@@ -393,7 +395,7 @@ public class JavacSingularsRecipes {
 			}
 		}
 		
-		public void appendCleaningCode(SingularData data, JavacNode builderType, JCTree source, ListBuffer<JCStatement> statements) {
+		public void appendCleaningCode(SingularData data, JavacNode builderType, JavacNode source, ListBuffer<JCStatement> statements) {
 		}
 		
 		// -- Utility methods --
@@ -409,16 +411,15 @@ public class JavacSingularsRecipes {
 		 * @param typeArgs the list of type args to clone.
 		 * @param source The source annotation that is the root cause of this code generation.
 		 */
-		protected JCExpression addTypeArgs(int count, boolean addExtends, JavacNode node, JCExpression type, List<JCExpression> typeArgs, JCTree source) {
+		protected JCExpression addTypeArgs(int count, boolean addExtends, JavacNode node, JCExpression type, List<JCExpression> typeArgs, JavacNode source) {
 			JavacTreeMaker maker = node.getTreeMaker();
 			List<JCExpression> clonedAndFixedTypeArgs = createTypeArgs(count, addExtends, node, typeArgs, source);
 			
 			return maker.TypeApply(type, clonedAndFixedTypeArgs);
 		}
 		
-		protected List<JCExpression> createTypeArgs(int count, boolean addExtends, JavacNode node, List<JCExpression> typeArgs, JCTree source) {
+		protected List<JCExpression> createTypeArgs(int count, boolean addExtends, JavacNode node, List<JCExpression> typeArgs, JavacNode source) {
 			JavacTreeMaker maker = node.getTreeMaker();
-			Context context = node.getContext();
 			
 			if (count < 0) throw new IllegalArgumentException("count is negative");
 			if (count == 0) return List.nil();
@@ -435,17 +436,17 @@ public class JavacSingularsRecipes {
 						} catch (Exception e) {
 							inner = genJavaLangTypeRef(node, "Object");
 						}
-						arguments.append(cloneType(maker, inner, source, context));
+						arguments.append(cloneType(maker, inner, source));
 					} else {
-						arguments.append(cloneType(maker, orig, source, context));
+						arguments.append(cloneType(maker, orig, source));
 					}
 				} else {
 					if (orig.getKind() == Kind.UNBOUNDED_WILDCARD || orig.getKind() == Kind.SUPER_WILDCARD) {
 						arguments.append(maker.Wildcard(maker.TypeBoundKind(BoundKind.UNBOUND), null));
 					} else if (orig.getKind() == Kind.EXTENDS_WILDCARD) {
-						arguments.append(cloneType(maker, orig, source, context));
+						arguments.append(cloneType(maker, orig, source));
 					} else {
-						arguments.append(maker.Wildcard(maker.TypeBoundKind(BoundKind.EXTENDS), cloneType(maker, orig, source, context)));
+						arguments.append(maker.Wildcard(maker.TypeBoundKind(BoundKind.EXTENDS), cloneType(maker, orig, source)));
 					}
 				}
 				if (--count == 0) break;
@@ -468,7 +469,7 @@ public class JavacSingularsRecipes {
 			JCExpression fn = maker.Select(maker.Select(maker.Ident(thisName), name), builderType.toName("size"));
 			JCExpression sizeInvoke = maker.Apply(List.<JCExpression>nil(), fn, List.<JCExpression>nil());
 			if (nullGuard) {
-				JCExpression isNull = maker.Binary(CTC_EQUAL, maker.Select(maker.Ident(thisName), name), maker.Literal(CTC_BOT, 0));
+				JCExpression isNull = maker.Binary(CTC_EQUAL, maker.Select(maker.Ident(thisName), name), maker.Literal(CTC_BOT, null));
 				JCExpression out = maker.Conditional(isNull, maker.Literal(CTC_INT, 0), sizeInvoke);
 				if (parens) return maker.Parens(out);
 				return out;
@@ -476,7 +477,7 @@ public class JavacSingularsRecipes {
 			return sizeInvoke;
 		}
 		
-		protected JCExpression cloneParamType(int index, JavacTreeMaker maker, List<JCExpression> typeArgs, JavacNode builderType, JCTree source) {
+		protected JCExpression cloneParamType(int index, JavacTreeMaker maker, List<JCExpression> typeArgs, JavacNode builderType, JavacNode source) {
 			if (typeArgs == null || typeArgs.size() <= index) {
 				return genJavaLangTypeRef(builderType, "Object");
 			} else {
@@ -485,12 +486,12 @@ public class JavacSingularsRecipes {
 					return genJavaLangTypeRef(builderType, "Object");
 				} else if (originalType.getKind() == Kind.EXTENDS_WILDCARD) {
 					try {
-						return cloneType(maker, (JCExpression) ((JCWildcard) originalType).inner, source, builderType.getContext());
+						return cloneType(maker, (JCExpression) ((JCWildcard) originalType).inner, source);
 					} catch (Exception e) {
 						return genJavaLangTypeRef(builderType, "Object");
 					}
 				} else {
-					return cloneType(maker, originalType, source, builderType.getContext());
+					return cloneType(maker, originalType, source);
 				}
 			}
 		}
@@ -500,5 +501,11 @@ public class JavacSingularsRecipes {
 		protected abstract int getTypeArgumentsCount();
 		
 		protected abstract String getEmptyMaker(String target);
+		
+		public JCExpression getEmptyExpression(String target, JavacTreeMaker maker, SingularData data, JavacNode builderType, JavacNode source) {
+			String emptyMaker = getEmptyMaker(target);
+			List<JCExpression> typeArgs = createTypeArgs(getTypeArgumentsCount(), false, builderType, data.getTypeArgs(), source);
+			return maker.Apply(typeArgs, chainDots(builderType, emptyMaker.split("\\.")), List.<JCExpression>nil());
+		}
 	}
 }

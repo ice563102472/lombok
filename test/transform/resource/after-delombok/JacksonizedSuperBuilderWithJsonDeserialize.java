@@ -1,5 +1,4 @@
 //skip-idempotent
-@lombok.experimental.SuperBuilder
 @com.fasterxml.jackson.databind.annotation.JsonDeserialize
 public class JacksonizedSuperBuilderWithJsonDeserialize {
 	int field1;
@@ -11,6 +10,9 @@ public class JacksonizedSuperBuilderWithJsonDeserialize {
 		protected abstract B self();
 		@java.lang.SuppressWarnings("all")
 		public abstract C build();
+		/**
+		 * @return {@code this}.
+		 */
 		@java.lang.SuppressWarnings("all")
 		public B field1(final int field1) {
 			this.field1 = field1;

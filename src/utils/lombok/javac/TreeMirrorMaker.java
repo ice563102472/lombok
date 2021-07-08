@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2015 The Project Lombok Authors.
+ * Copyright (C) 2010-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,14 +56,14 @@ public class TreeMirrorMaker extends TreeCopier<Void> {
 	
 	@Override public <T extends JCTree> T copy(T original) {
 		T copy = super.copy(original);
-		originalToCopy.put(original, copy);
+		putIfAbsent(originalToCopy, original, copy);
 		return copy;
 	}
 	
 	@Override public <T extends JCTree> T copy(T original, Void p) {
 		T copy = super.copy(original, p);
-		originalToCopy.put(original, copy);
-		return copy;
+		putIfAbsent(originalToCopy, original, copy);
+		return copy; 
 	}
 	
 	@Override public <T extends JCTree> List<T> copy(List<T> originals) {
@@ -71,7 +71,7 @@ public class TreeMirrorMaker extends TreeCopier<Void> {
 		if (originals != null) {
 			Iterator<T> it1 = originals.iterator();
 			Iterator<T> it2 = copies.iterator();
-			while (it1.hasNext()) originalToCopy.put(it1.next(), it2.next());
+			while (it1.hasNext()) putIfAbsent(originalToCopy, it1.next(), it2.next());
 		}
 		return copies;
 	}
@@ -81,7 +81,7 @@ public class TreeMirrorMaker extends TreeCopier<Void> {
 		if (originals != null) {
 			Iterator<T> it1 = originals.iterator();
 			Iterator<T> it2 = copies.iterator();
-			while (it1.hasNext()) originalToCopy.put(it1.next(), it2.next());
+			while (it1.hasNext()) putIfAbsent(originalToCopy, it1.next(), it2.next());
 		}
 		return copies;
 	}
@@ -91,8 +91,8 @@ public class TreeMirrorMaker extends TreeCopier<Void> {
 	}
 	
 	// Monitor the following issues when making changes here.
-	// - https://github.com/rzwitserloot/lombok/issues/278
-	// - https://github.com/rzwitserloot/lombok/issues/729
+	// - https://github.com/projectlombok/lombok/issues/278
+	// - https://github.com/projectlombok/lombok/issues/729
 	@Override public JCTree visitVariable(VariableTree node, Void p) {
 		JCVariableDecl original = node instanceof JCVariableDecl ? (JCVariableDecl) node : null;
 		JCVariableDecl copy = (JCVariableDecl) super.visitVariable(node, p);
@@ -115,9 +115,15 @@ public class TreeMirrorMaker extends TreeCopier<Void> {
 		return copy;
 	}
 	
-	// Fix for NPE in HandleVal. See https://github.com/rzwitserloot/lombok/issues/372
+	// Fix for NPE in HandleVal. See https://github.com/projectlombok/lombok/issues/372
 	// This and visitVariable is rather hacky but we're working around evident bugs or at least inconsistencies in javac.
 	@Override public JCTree visitLabeledStatement(LabeledStatementTree node, Void p) {
 		return node.getStatement().accept(this, p);
+	}
+	
+	private <K, V> void putIfAbsent(Map<K, V> map, K key, V value) {
+		if (!map.containsKey(key)) {
+			map.put(key, value);
+		}
 	}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2020 The Project Lombok Authors.
+ * Copyright (C) 2010-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,7 @@ import lombok.core.AnnotationValues;
 import lombok.eclipse.EclipseAnnotationHandler;
 import lombok.eclipse.EclipseNode;
 import lombok.eclipse.handlers.EclipseHandlerUtil.MemberExistsResult;
+import lombok.spi.Provides;
 
 import org.eclipse.jdt.internal.compiler.ast.ASTNode;
 import org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration;
@@ -79,10 +80,9 @@ import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
-import org.mangosdk.spi.ProviderFor;
 
 public class HandleConstructor {
-	@ProviderFor(EclipseAnnotationHandler.class)
+	@Provides
 	public static class HandleNoArgsConstructor extends EclipseAnnotationHandler<NoArgsConstructor> {
 		private static final String NAME = NoArgsConstructor.class.getSimpleName();
 		private HandleConstructor handleConstructor = new HandleConstructor();
@@ -105,7 +105,7 @@ public class HandleConstructor {
 		}
 	}
 	
-	@ProviderFor(EclipseAnnotationHandler.class)
+	@Provides
 	public static class HandleRequiredArgsConstructor extends EclipseAnnotationHandler<RequiredArgsConstructor> {
 		private static final String NAME = RequiredArgsConstructor.class.getSimpleName();
 		private HandleConstructor handleConstructor = new HandleConstructor();
@@ -166,7 +166,7 @@ public class HandleConstructor {
 		return fields;
 	}
 	
-	@ProviderFor(EclipseAnnotationHandler.class)
+	@Provides
 	public static class HandleAllArgsConstructor extends EclipseAnnotationHandler<AllArgsConstructor> {
 		private static final String NAME = AllArgsConstructor.class.getSimpleName();
 
@@ -194,12 +194,7 @@ public class HandleConstructor {
 	}
 	
 	static boolean checkLegality(EclipseNode typeNode, EclipseNode errorNode, String name) {
-		TypeDeclaration typeDecl = null;
-		if (typeNode.get() instanceof TypeDeclaration) typeDecl = (TypeDeclaration) typeNode.get();
-		int modifiers = typeDecl == null ? 0 : typeDecl.modifiers;
-		boolean notAClass = (modifiers & (ClassFileConstants.AccInterface | ClassFileConstants.AccAnnotation)) != 0;
-		
-		if (typeDecl == null || notAClass) {
+		if (!isClassOrEnum(typeNode)) {
 			errorNode.addError(name + " is only supported on a class or an enum.");
 			return false;
 		}
@@ -461,14 +456,12 @@ public class HandleConstructor {
 		constructor.arguments = params.isEmpty() ? null : params.toArray(new Argument[0]);
 		
 		/* Generate annotations that must  be put on the generated method, and attach them. */ {
-			Annotation[] constructorProperties = null, checkerFramework = null;
+			Annotation[] constructorProperties = null;
 			if (addConstructorProperties && !isLocalType(type)) constructorProperties = createConstructorProperties(source, fieldsToParam);
-			if (getCheckerFrameworkVersion(type).generateUnique()) checkerFramework = new Annotation[] { generateNamedAnnotation(source, CheckerFrameworkVersion.NAME__UNIQUE) };
 			
 			constructor.annotations = copyAnnotations(source,
 				onConstructor.toArray(new Annotation[0]),
-				constructorProperties,
-				checkerFramework);
+				constructorProperties);
 		}
 		
 		constructor.traverse(new SetGeneratedByVisitor(source), typeDeclaration.scope);
@@ -536,6 +529,11 @@ public class HandleConstructor {
 		TypeDeclaration typeDecl = (TypeDeclaration) type.get();
 		constructor.returnType = EclipseHandlerUtil.namePlusTypeParamsToTypeReference(type, typeDecl.typeParameters, p);
 		constructor.annotations = null;
+		if (getCheckerFrameworkVersion(type).generateUnique()) {
+			int len = constructor.returnType.getTypeName().length;
+			constructor.returnType.annotations = new Annotation[len][];
+			constructor.returnType.annotations[len - 1] = new Annotation[] {generateNamedAnnotation(source, CheckerFrameworkVersion.NAME__UNIQUE)};
+		}
 		constructor.selector = name.toCharArray();
 		constructor.thrownExceptions = null;
 		constructor.typeParameters = copyTypeParams(((TypeDeclaration) type.get()).typeParameters, source);
@@ -556,9 +554,7 @@ public class HandleConstructor {
 			assigns.add(nameRef);
 			
 			Argument parameter = new Argument(field.name, fieldPos, copyType(field.type, source), Modifier.FINAL);
-			Annotation[] checkerFramework = null;
-			if (getCheckerFrameworkVersion(fieldNode).generateUnique()) checkerFramework = new Annotation[] { generateNamedAnnotation(source, CheckerFrameworkVersion.NAME__UNIQUE) };
-			parameter.annotations = copyAnnotations(source, findCopyableAnnotations(fieldNode), checkerFramework);
+			parameter.annotations = copyAnnotations(source, findCopyableAnnotations(fieldNode));
 			params.add(parameter);
 		}
 		

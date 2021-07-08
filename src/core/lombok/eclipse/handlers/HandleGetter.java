@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2020 The Project Lombok Authors.
+ * Copyright (C) 2009-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@ import java.util.Map;
 import lombok.AccessLevel;
 import lombok.ConfigurationKeys;
 import lombok.experimental.Delegate;
+import lombok.spi.Provides;
 import lombok.Getter;
 import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
@@ -73,14 +74,14 @@ import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
-import org.mangosdk.spi.ProviderFor;
 
 /**
  * Handles the {@code lombok.Getter} annotation for eclipse.
  */
-@ProviderFor(EclipseAnnotationHandler.class)
+@Provides
 public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 	private static final Annotation[] EMPTY_ANNOTATIONS_ARRAY = new Annotation[0];
+	private static final String GETTER_NODE_NOT_SUPPORTED_ERR = "@Getter is only supported on a class, an enum, or a field.";
 
 	public boolean generateGetterForType(EclipseNode typeNode, EclipseNode pos, AccessLevel level, boolean checkForTypeLevelGetter, List<Annotation> onMethod) {
 		if (checkForTypeLevelGetter) {
@@ -90,14 +91,8 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 			}
 		}
 		
-		TypeDeclaration typeDecl = null;
-		if (typeNode.get() instanceof TypeDeclaration) typeDecl = (TypeDeclaration) typeNode.get();
-		int modifiers = typeDecl == null ? 0 : typeDecl.modifiers;
-		boolean notAClass = (modifiers &
-				(ClassFileConstants.AccInterface | ClassFileConstants.AccAnnotation)) != 0;
-		
-		if (typeDecl == null || notAClass) {
-			pos.addError("@Getter is only supported on a class, an enum, or a field.");
+		if (!isClassOrEnum(typeNode)) {
+			pos.addError(GETTER_NODE_NOT_SUPPORTED_ERR);
 			return false;
 		}
 		
@@ -171,8 +166,9 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 	
 	public void createGetterForField(AccessLevel level,
 			EclipseNode fieldNode, EclipseNode errorNode, ASTNode source, boolean whineIfExists, boolean lazy, List<Annotation> onMethod) {
+		
 		if (fieldNode.getKind() != Kind.FIELD) {
-			errorNode.addError("@Getter is only supported on a class or a field.");
+			errorNode.addError(GETTER_NODE_NOT_SUPPORTED_ERR);
 			return;
 		}
 		
@@ -285,14 +281,18 @@ public class HandleGetter extends EclipseAnnotationHandler<Getter> {
 		}
 		
 		if (addSuppressWarningsUnchecked) {
+			List<Expression> suppressions = new ArrayList<Expression>(2);
+			if (!Boolean.FALSE.equals(fieldNode.getAst().readConfiguration(ConfigurationKeys.ADD_SUPPRESSWARNINGS_ANNOTATIONS))) {
+				suppressions.add(new StringLiteral(ALL, 0, 0, 0));
+			}
+			suppressions.add(new StringLiteral(UNCHECKED, 0, 0, 0));
 			ArrayInitializer arr = new ArrayInitializer();
-			arr.expressions = new Expression[2];
-			arr.expressions[0] = new StringLiteral(ALL, 0, 0, 0);
-			arr.expressions[1] = new StringLiteral(UNCHECKED, 0, 0, 0);
+			arr.expressions = suppressions.toArray(new Expression[0]);
 			method.annotations = addAnnotation(source, method.annotations, TypeConstants.JAVA_LANG_SUPPRESSWARNINGS, arr);
 		}
 		
 		method.traverse(new SetGeneratedByVisitor(source), parent.scope);
+		copyJavadoc(fieldNode, method, CopyJavadoc.GETTER);
 		return method;
 	}
 

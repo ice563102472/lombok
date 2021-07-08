@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2020 The Project Lombok Authors.
+ * Copyright (C) 2009-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,11 +38,9 @@ import lombok.core.handlers.InclusionExclusionUtils.Included;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
 import lombok.javac.JavacTreeMaker;
-
-import org.mangosdk.spi.ProviderFor;
+import lombok.spi.Provides;
 
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCArrayTypeTree;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
@@ -60,7 +58,7 @@ import com.sun.tools.javac.util.List;
 /**
  * Handles the {@code ToString} annotation for javac.
  */
-@ProviderFor(JavacAnnotationHandler.class)
+@Provides
 public class HandleToString extends JavacAnnotationHandler<ToString> {
 	@Override public void handle(AnnotationValues<ToString> annotation, JCAnnotation ast, JavacNode annotationNode) {
 		handleFlagUsage(annotationNode, ConfigurationKeys.TO_STRING_FLAG_USAGE, "@ToString");
@@ -107,13 +105,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 	public void generateToString(JavacNode typeNode, JavacNode source, java.util.List<Included<JavacNode, ToString.Include>> members,
 		boolean includeFieldNames, Boolean callSuper, boolean whineIfExists, FieldAccess fieldAccess) {
 		
-		boolean notAClass = true;
-		if (typeNode.get() instanceof JCClassDecl) {
-			long flags = ((JCClassDecl) typeNode.get()).mods.flags;
-			notAClass = (flags & (Flags.INTERFACE | Flags.ANNOTATION)) != 0;
-		}
-		
-		if (notAClass) {
+		if (!isClassOrEnum(typeNode)) {
 			source.addError("@ToString is only supported on a class or enum.");
 			return;
 		}
@@ -141,7 +133,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 					}
 				}
 			}
-			JCMethodDecl method = createToString(typeNode, members, includeFieldNames, callSuper, fieldAccess, source.get());
+			JCMethodDecl method = createToString(typeNode, members, includeFieldNames, callSuper, fieldAccess, source);
 			injectMethod(typeNode, method);
 			break;
 		case EXISTS_BY_LOMBOK:
@@ -156,7 +148,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 	}
 	
 	static JCMethodDecl createToString(JavacNode typeNode, Collection<Included<JavacNode, ToString.Include>> members,
-		boolean includeNames, boolean callSuper, FieldAccess fieldAccess, JCTree source) {
+		boolean includeNames, boolean callSuper, FieldAccess fieldAccess, JavacNode source) {
 		
 		JavacTreeMaker maker = typeNode.getTreeMaker();
 		
@@ -256,7 +248,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 		JCMethodDecl methodDef = maker.MethodDef(mods, typeNode.toName("toString"), returnType,
 			List.<JCTypeParameter>nil(), List.<JCVariableDecl>nil(), List.<JCExpression>nil(), body, null);
 		createRelevantNonNullAnnotation(typeNode, methodDef);
-		return recursiveSetGeneratedBy(methodDef, source, typeNode.getContext());
+		return recursiveSetGeneratedBy(methodDef, source);
 	}
 	
 	public static String getTypeName(JavacNode typeNode) {

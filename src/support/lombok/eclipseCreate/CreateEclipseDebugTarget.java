@@ -93,10 +93,14 @@ public class CreateEclipseDebugTarget {
 			throw new InvalidCommandLineException("Cannot obtain canonical path to parent directory", e);
 		}
 		
-		launchContent.append("\t\t<listEntry value=\"&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry internalArchive=&quot;/lombok/bin&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;\"/>\n");
+		String bootpath = getBootPath();
+		
+		launchContent.append("\t\t<listEntry value=\"&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry internalArchive=&quot;/lombok/bin/main&quot; path=&quot;3&quot; type=&quot;2&quot;/&gt;&#10;\"/>\n");
 		for (Map.Entry<String, String> entry : args.entrySet()) {
 			if (!entry.getKey().startsWith("conf.")) continue;
-			String[] files = entry.getValue().split(Pattern.quote(File.pathSeparator));
+			String v = entry.getValue();
+			if (v.equals("NONE")) continue;
+			String[] files = v.split(Pattern.quote(File.pathSeparator));
 			for (String file : files) {
 				String n;
 				try {
@@ -111,7 +115,7 @@ public class CreateEclipseDebugTarget {
 				}
 			}
 		}
-		launchContent.append("\t\t<listEntry value=\"&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry internalArchive=&quot;/lombok/lib/openjdk6_rt.jar&quot; path=&quot;5&quot; type=&quot;2&quot;/&gt;&#10;\"/>\n");
+		if (bootpath != null) launchContent.append("\t\t<listEntry value=\"&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;no&quot;?&gt;&#10;&lt;runtimeClasspathEntry internalArchive=&quot;/lombok/" + bootpath + "&quot; path=&quot;5&quot; type=&quot;2&quot;/&gt;&#10;\"/>\n");
 		launchContent.append("\t</listAttribute>\n");
 	}
 	
@@ -120,17 +124,31 @@ public class CreateEclipseDebugTarget {
 		
 		launchContent.append("\t<booleanAttribute key=\"org.eclipse.jdt.launching.DEFAULT_CLASSPATH\" value=\"false\"/>\n");
 		String jvmTarget = getArgString("jvmTarget");
+		String bootpath = getBootPath();
 		launchContent.append("\t<stringAttribute key=\"org.eclipse.jdt.launching.JRE_CONTAINER\" value=\"org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-").append(jvmTarget).append("\"/>\n");
 		launchContent.append("\t<stringAttribute key=\"org.eclipse.jdt.launching.MAIN_TYPE\" value=\"").append(type).append("\"/>\n");
 		launchContent.append("\t<listAttribute key=\"org.eclipse.jdt.launching.MODULEPATH\"/>\n");
 		launchContent.append("\t<stringAttribute key=\"org.eclipse.jdt.launching.PROJECT_ATTR\" value=\"lombok\"/>\n");
-		launchContent.append("<stringAttribute key=\"org.eclipse.jdt.launching.VM_ARGUMENTS\" value=\"-javaagent:dist/lombok.jar -Dshadow.override.lombok=${project_loc:lombok}/bin");
-		for (Map.Entry<String, String> entry : args.entrySet()) {
-			if (!entry.getKey().startsWith("conf.")) continue;
-			launchContent.append(File.pathSeparator).append(entry.getValue());
+		if (getArgBoolean("shadowLoaderBased")) {
+			launchContent.append("<stringAttribute key=\"org.eclipse.jdt.launching.VM_ARGUMENTS\" value=\"-javaagent:dist/lombok.jar -Dshadow.override.lombok=${project_loc:lombok}/bin/main");
+			for (Map.Entry<String, String> entry : args.entrySet()) {
+				if (!entry.getKey().startsWith("conf.")) continue;
+				launchContent.append(File.pathSeparator).append(entry.getValue());
+			}
+			if (bootpath != null) launchContent.append(" -Ddelombok.bootclasspath=" + bootpath);
 		}
-		launchContent.append(" -Ddelombok.bootclasspath=lib/openjdk6_rt.jar\"/>\n");
-		launchContent.append("</launchConfiguration>\n");
+		launchContent.append("\"/>\n</launchConfiguration>\n");
+	}
+	
+	private String getBootPath() {
+		String bp = args.get("bootpath");
+		if (bp == null || bp.isEmpty() || bp.equals("0")) return null;
+		File f = new File(bp);
+		if (!f.isAbsolute()) return bp;
+		String r = new File(".").getAbsolutePath();
+		if (r.endsWith(".")) r = r.substring(0, r.length() - 1);
+		if (bp.startsWith(r)) return bp.substring(r.length());
+		throw new IllegalStateException("Cannot reconstruct relative path; base: " + r + " is not a parent of " + bp);
 	}
 	
 	private String getArgString(String key) throws InvalidCommandLineException {
@@ -150,6 +168,7 @@ public class CreateEclipseDebugTarget {
 		System.err.println("CreateEclipseDebugTarget\n" +
 			"   name=Lombok-test BaseJavac 11           # Sets the name of the debug target to make\n" +
 			"   testType=lombok.RunJavacAndBaseTests    # The test class file that this debug target should run\n" +
+			"   shadowLoaderBased                       # Add the VM options to use lombok as an agent and pass the classpath to the shadow loader. Needed for ECJ/Eclipse.\n" +
 			"   conf.test=foo:bar:baz                   # Where 'test' is an ivy conf name, and 'foo' is a path to a jar, relativized vs. current directory.\n" +
 			"   favorite                                # Should the debug target be marked as favourite?\n" +
 			"");

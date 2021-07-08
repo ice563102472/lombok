@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2020 The Project Lombok Authors.
+ * Copyright (C) 2015-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,9 @@
 package lombok.javac.handlers;
 
 import static lombok.core.handlers.HandlerUtil.handleExperimentalFlagUsage;
-import static lombok.javac.Javac.CTC_VOID;
 import static lombok.javac.handlers.JavacHandlerUtil.*;
 
-import org.mangosdk.spi.ProviderFor;
-
 import com.sun.tools.javac.code.Flags;
-import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
@@ -46,16 +42,16 @@ import lombok.core.AST.Kind;
 import lombok.core.AnnotationValues;
 import lombok.core.HandlerPriority;
 import lombok.experimental.UtilityClass;
-import lombok.javac.Javac;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
 import lombok.javac.JavacTreeMaker;
+import lombok.spi.Provides;
 
 /**
  * Handles the {@code @UtilityClass} annotation for javac.
  */
 @HandlerPriority(-4096) //-2^12; to ensure @FieldDefaults picks up on the 'static' we set here.
-@ProviderFor(JavacAnnotationHandler.class)
+@Provides
 public class HandleUtilityClass extends JavacAnnotationHandler<UtilityClass> {
 	@Override public void handle(AnnotationValues<UtilityClass> annotation, JCAnnotation ast, JavacNode annotationNode) {
 		handleExperimentalFlagUsage(annotationNode, ConfigurationKeys.UTILITY_CLASS_FLAG_USAGE, "@UtilityClass");
@@ -68,13 +64,8 @@ public class HandleUtilityClass extends JavacAnnotationHandler<UtilityClass> {
 	}
 	
 	private static boolean checkLegality(JavacNode typeNode, JavacNode errorNode) {
-		JCClassDecl typeDecl = null;
-		if (typeNode.get() instanceof JCClassDecl) typeDecl = (JCClassDecl) typeNode.get();
-		long modifiers = typeDecl == null ? 0 : typeDecl.mods.flags;
-		boolean notAClass = (modifiers & (Flags.INTERFACE | Flags.ANNOTATION | Flags.ENUM)) != 0;
-		
-		if (typeDecl == null || notAClass) {
-			errorNode.addError("@UtilityClass is only supported on a class (can't be an interface, enum, or annotation).");
+		if (!isClass(typeNode)) {
+			errorNode.addError("@UtilityClass is only supported on a class.");
 			return false;
 		}
 		
@@ -146,8 +137,8 @@ public class HandleUtilityClass extends JavacAnnotationHandler<UtilityClass> {
 		Name name = typeNode.toName("<init>");
 		JCBlock block = maker.Block(0L, createThrowStatement(typeNode, maker));
 		JCMethodDecl methodDef = maker.MethodDef(mods, name, null, List.<JCTypeParameter>nil(), List.<JCVariableDecl>nil(), List.<JCExpression>nil(), block, null);
-		JCMethodDecl constructor = recursiveSetGeneratedBy(methodDef, typeNode.get(), typeNode.getContext());
-		JavacHandlerUtil.injectMethod(typeNode, constructor, List.<Type>nil(), Javac.createVoidType(typeNode.getSymbolTable(), CTC_VOID));
+		JCMethodDecl constructor = recursiveSetGeneratedBy(methodDef, typeNode);
+		JavacHandlerUtil.injectMethod(typeNode, constructor);
 	}
 	
 	private List<JCStatement> createThrowStatement(JavacNode typeNode, JavacTreeMaker maker) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2020 The Project Lombok Authors.
+ * Copyright (C) 2009-2021 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@ package lombok.eclipse.handlers;
 
 import static lombok.core.handlers.HandlerUtil.*;
 import static lombok.eclipse.Eclipse.*;
-import static lombok.eclipse.EclipseAugments.*;
+import static lombok.eclipse.EcjAugments.*;
 import static lombok.eclipse.handlers.EclipseHandlerUtil.EclipseReflectiveMembers.*;
 
 import java.lang.reflect.Array;
@@ -39,6 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.eclipse.jdt.core.compiler.CharOperation;
 import org.eclipse.jdt.internal.compiler.ast.ASTNode;
 import org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.AbstractVariableDeclaration;
@@ -49,6 +50,7 @@ import org.eclipse.jdt.internal.compiler.ast.ArrayInitializer;
 import org.eclipse.jdt.internal.compiler.ast.ArrayQualifiedTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.ArrayTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.AssertStatement;
+import org.eclipse.jdt.internal.compiler.ast.BinaryExpression;
 import org.eclipse.jdt.internal.compiler.ast.Block;
 import org.eclipse.jdt.internal.compiler.ast.CastExpression;
 import org.eclipse.jdt.internal.compiler.ast.CharLiteral;
@@ -120,6 +122,7 @@ import lombok.core.configuration.TypeName;
 import lombok.core.debug.ProblemReporter;
 import lombok.core.handlers.HandlerUtil;
 import lombok.core.handlers.HandlerUtil.FieldAccess;
+import lombok.eclipse.EcjAugments;
 import lombok.eclipse.Eclipse;
 import lombok.eclipse.EclipseAST;
 import lombok.eclipse.EclipseNode;
@@ -287,9 +290,7 @@ public class EclipseHandlerUtil {
 			MarkerAnnotation ann = new MarkerAnnotation(copyType(annotation.type, source), pS);
 			setGeneratedBy(ann, source);
 			ann.declarationSourceEnd = ann.sourceEnd = ann.statementEnd = pE;
-			try {
-				reflectSet(ANNOTATION__MEMBER_VALUE_PAIR_NAME, ann, reflect(ANNOTATION__MEMBER_VALUE_PAIR_NAME, annotation));
-			} catch (Exception ignore) { /* Various eclipse versions don't have it */ }
+			copyMemberValuePairName(ann, annotation);
 			return ann;
 		}
 		
@@ -298,9 +299,7 @@ public class EclipseHandlerUtil {
 			setGeneratedBy(ann, source);
 			ann.declarationSourceEnd = ann.sourceEnd = ann.statementEnd = pE;
 			ann.memberValue = copyAnnotationMemberValue(((SingleMemberAnnotation) annotation).memberValue);
-			try {
-				reflectSet(ANNOTATION__MEMBER_VALUE_PAIR_NAME, ann, reflect(ANNOTATION__MEMBER_VALUE_PAIR_NAME, annotation));
-			} catch (Exception ignore) { /* Various eclipse versions don't have it */ }
+			copyMemberValuePairName(ann, annotation);
 			return ann;
 		}
 		
@@ -316,27 +315,37 @@ public class EclipseHandlerUtil {
 				for (int i = 0; i < inPairs.length; i++) ann.memberValuePairs[i] =
 						new MemberValuePair(inPairs[i].name, inPairs[i].sourceStart, inPairs[i].sourceEnd, copyAnnotationMemberValue(inPairs[i].value));
 			}
-			try {
-				reflectSet(ANNOTATION__MEMBER_VALUE_PAIR_NAME, ann, reflect(ANNOTATION__MEMBER_VALUE_PAIR_NAME, annotation));
-			} catch (Exception ignore) { /* Various eclipse versions don't have it */ }
+			copyMemberValuePairName(ann, annotation);
 			return ann;
 		}
 		
 		return annotation;
 	}
 	
+	private static void copyMemberValuePairName(Annotation source, Annotation target) {
+		if (ANNOTATION__MEMBER_VALUE_PAIR_NAME == null) return;
+		
+		try {
+			reflectSet(ANNOTATION__MEMBER_VALUE_PAIR_NAME, source, reflect(ANNOTATION__MEMBER_VALUE_PAIR_NAME, target));
+		} catch (Exception ignore) { /* Various eclipse versions don't have it */ }
+	}
+	
 	static class EclipseReflectiveMembers {
 		public static final Field STRING_LITERAL__LINE_NUMBER;
 		public static final Field ANNOTATION__MEMBER_VALUE_PAIR_NAME;
 		public static final Field TYPE_REFERENCE__ANNOTATIONS;
-		public static final Class<?> INTERSECTION_BINDING;
-		public static final Field INTERSECTION_BINDING_TYPES;
+		public static final Class<?> INTERSECTION_BINDING1, INTERSECTION_BINDING2;
+		public static final Field INTERSECTION_BINDING_TYPES1, INTERSECTION_BINDING_TYPES2;
+		public static final Field TYPE_DECLARATION_RECORD_COMPONENTS;
 		static {
 			STRING_LITERAL__LINE_NUMBER = getField(StringLiteral.class, "lineNumber");
 			ANNOTATION__MEMBER_VALUE_PAIR_NAME = getField(Annotation.class, "memberValuePairName");
 			TYPE_REFERENCE__ANNOTATIONS = getField(TypeReference.class, "annotations");
-			INTERSECTION_BINDING = getClass("org.eclipse.jdt.internal.compiler.lookup.IntersectionTypeBinding18");
-			INTERSECTION_BINDING_TYPES = INTERSECTION_BINDING == null ? null : getField(INTERSECTION_BINDING, "intersectingTypes");
+			INTERSECTION_BINDING1 = getClass("org.eclipse.jdt.internal.compiler.lookup.IntersectionTypeBinding18");
+			INTERSECTION_BINDING2 = getClass("org.eclipse.jdt.internal.compiler.lookup.IntersectionCastTypeBinding");
+			INTERSECTION_BINDING_TYPES1 = INTERSECTION_BINDING1 == null ? null : getField(INTERSECTION_BINDING1, "intersectingTypes");
+			INTERSECTION_BINDING_TYPES2 = INTERSECTION_BINDING2 == null ? null : getField(INTERSECTION_BINDING2, "intersectingTypes");
+			TYPE_DECLARATION_RECORD_COMPONENTS = getField(TypeDeclaration.class, "recordComponents");
 		}
 		
 		public static int reflectInt(Field f, Object o) {
@@ -366,7 +375,7 @@ public class EclipseHandlerUtil {
 		private static Class<?> getClass(String fqn) {
 			try {
 				return Class.forName(fqn);
-			} catch (Exception e) {
+			} catch (Throwable t) {
 				return null;
 			}
 		}
@@ -374,13 +383,13 @@ public class EclipseHandlerUtil {
 		private static Field getField(Class<?> c, String fName) {
 			try {
 				return Permit.getField(c, fName);
-			} catch (Exception e) {
+			} catch (Throwable t) {
 				return null;
 			}
 		}
 	}
 	
-	private static Expression copyAnnotationMemberValue(Expression in) {
+	public static Expression copyAnnotationMemberValue(Expression in) {
 		Expression out = copyAnnotationMemberValue0(in);
 		out.constant = in.constant;
 		return out;
@@ -421,12 +430,11 @@ public class EclipseHandlerUtil {
 		
 		if (in instanceof SingleNameReference) {
 			SingleNameReference snr = (SingleNameReference) in;
-			long p = (long) s << 32 | e;
-			return new SingleNameReference(snr.token, p);
+			return new SingleNameReference(snr.token, pos(in));
 		}
 		if (in instanceof QualifiedNameReference) {
 			QualifiedNameReference qnr = (QualifiedNameReference) in;
-			return new QualifiedNameReference(qnr.tokens, qnr.sourcePositions, s, e);
+			return new QualifiedNameReference(qnr.tokens, poss(in, qnr.tokens.length), s, e);
 		}
 		
 		// class refs
@@ -442,8 +450,19 @@ public class EclipseHandlerUtil {
 			out.sourceEnd = e;
 			out.bits = in.bits;
 			out.implicitConversion = in.implicitConversion;
-			out.statementEnd = in.statementEnd;
+			out.statementEnd = e;
 			out.expressions = copy;
+			return out;
+		}
+		
+		if (in instanceof BinaryExpression) {
+			BinaryExpression be = (BinaryExpression) in;
+			BinaryExpression out = new BinaryExpression(be);
+			out.left = copyAnnotationMemberValue(be.left);
+			out.right = copyAnnotationMemberValue(be.right);
+			out.sourceStart = s;
+			out.sourceEnd = e;
+			out.statementEnd = e;
 			return out;
 		}
 		
@@ -758,13 +777,10 @@ public class EclipseHandlerUtil {
 	}
 	
 	public static boolean hasNonNullAnnotations(EclipseNode node) {
-		AbstractVariableDeclaration avd = (AbstractVariableDeclaration) node.get();
-		if (avd.annotations == null) return false;
-		for (Annotation annotation : avd.annotations) {
-			TypeReference typeRef = annotation.type;
-			if (typeRef != null && typeRef.getTypeName() != null) {
-				for (String bn : NONNULL_ANNOTATIONS) if (typeMatches(bn, node, typeRef)) return true;
-			}
+		for (EclipseNode child : node.down()) {
+			if (child.getKind() != Kind.ANNOTATION) continue;
+			Annotation annotation = (Annotation) child.get();
+			for (String bn : NONNULL_ANNOTATIONS) if (typeMatches(bn, node, annotation.type)) return true;
 		}
 		return false;
 	}
@@ -1034,11 +1050,54 @@ public class EclipseHandlerUtil {
 		
 		return res;
 	}
-
+	
+	private static final char[] OBJECT_SIG = "Ljava/lang/Object;".toCharArray();
+	
+	private static int compare(char[] a, char[] b) {
+		if (a == null) return b == null ? 0 : -1;
+		if (b == null) return +1;
+		int len = Math.min(a.length, b.length);
+		for (int i = 0; i < len; i++) {
+			if (a[i] < b[i]) return -1;
+			if (a[i] > b[i]) return +1;
+		}
+		return a.length < b.length ? -1 : a.length > b.length ? +1 : 0;
+	}
+	
 	public static TypeReference makeType(TypeBinding binding, ASTNode pos, boolean allowCompound) {
-		if (binding.getClass() == EclipseReflectiveMembers.INTERSECTION_BINDING) {
-			Object[] arr = (Object[]) EclipseReflectiveMembers.reflect(EclipseReflectiveMembers.INTERSECTION_BINDING_TYPES, binding);
-			binding = (TypeBinding) arr[0];
+		Object[] arr = null;
+		if (binding.getClass() == EclipseReflectiveMembers.INTERSECTION_BINDING1) {
+			arr = (Object[]) EclipseReflectiveMembers.reflect(EclipseReflectiveMembers.INTERSECTION_BINDING_TYPES1, binding);
+		} else if (binding.getClass() == EclipseReflectiveMembers.INTERSECTION_BINDING2) {
+			arr = (Object[]) EclipseReflectiveMembers.reflect(EclipseReflectiveMembers.INTERSECTION_BINDING_TYPES2, binding);
+		}
+		
+		if (arr != null) {
+			// Is there a class? Alphabetically lowest wins.
+			TypeBinding winner = null;
+			int winLevel = 0; // 100 = array, 50 = class, 20 = typevar, 15 = wildcard, 10 = interface, 1 = Object.
+			for (Object b : arr) {
+				if (b instanceof TypeBinding) {
+					TypeBinding tb = (TypeBinding) b;
+					int level = 0;
+					if (tb.isArrayType()) level = 100;
+					else if (tb.isClass()) level = 50;
+					else if (tb.isTypeVariable()) level = 20;
+					else if (tb.isWildcard()) level = 15;
+					else level = 10;
+					
+					if (level == 50 && compare(tb.signature(), OBJECT_SIG) == 0) level = 1;
+					
+					if (winLevel > level) continue;
+					if (winLevel < level) {
+						winner = tb;
+						winLevel = level;
+						continue;
+					}
+					if (compare(winner.signature(), tb.signature()) > 0) winner = tb;
+				}
+			}
+			binding = winner;
 		}
 		int dims = binding.dimensions();
 		binding = binding.leafComponentType();
@@ -1816,15 +1875,12 @@ public class EclipseHandlerUtil {
 	public static MemberExistsResult constructorExists(EclipseNode node) {
 		node = upToTypeNode(node);
 		if (node != null && node.get() instanceof TypeDeclaration) {
-			TypeDeclaration typeDecl = (TypeDeclaration)node.get();
+			TypeDeclaration typeDecl = (TypeDeclaration) node.get();
 			if (typeDecl.methods != null) for (AbstractMethodDeclaration def : typeDecl.methods) {
-				if (def instanceof ConstructorDeclaration) {
-					if ((def.bits & ASTNode.IsDefaultConstructor) != 0) continue;
-					
-					if (isTolerate(node, def)) continue;
-					
-					return getGeneratedBy(def) == null ? MemberExistsResult.EXISTS_BY_USER : MemberExistsResult.EXISTS_BY_LOMBOK;
-				}
+				if (!(def instanceof ConstructorDeclaration)) continue;
+				if ((def.bits & ASTNode.IsDefaultConstructor) != 0) continue;
+				if (isTolerate(node, def)) continue;
+				return getGeneratedBy(def) == null ? MemberExistsResult.EXISTS_BY_USER : MemberExistsResult.EXISTS_BY_LOMBOK;
 			}
 		}
 		
@@ -1951,7 +2007,11 @@ public class EclipseHandlerUtil {
 	private static final char[][] EDU_UMD_CS_FINDBUGS_ANNOTATIONS_SUPPRESSFBWARNINGS = Eclipse.fromQualifiedName("edu.umd.cs.findbugs.annotations.SuppressFBWarnings");
 	
 	public static Annotation[] addSuppressWarningsAll(EclipseNode node, ASTNode source, Annotation[] originalAnnotationArray) {
-		Annotation[] anns = addAnnotation(source, originalAnnotationArray, TypeConstants.JAVA_LANG_SUPPRESSWARNINGS, new StringLiteral(ALL, 0, 0, 0));
+		Annotation[] anns = originalAnnotationArray;
+		
+		if (!Boolean.FALSE.equals(node.getAst().readConfiguration(ConfigurationKeys.ADD_SUPPRESSWARNINGS_ANNOTATIONS))) {
+			anns = addAnnotation(source, anns, TypeConstants.JAVA_LANG_SUPPRESSWARNINGS, new StringLiteral(ALL, 0, 0, 0));
+		}
 		
 		if (Boolean.TRUE.equals(node.getAst().readConfiguration(ConfigurationKeys.ADD_FINDBUGS_SUPPRESSWARNINGS_ANNOTATIONS))) {
 			MemberValuePair mvp = new MemberValuePair(JUSTIFICATION, 0, 0, new StringLiteral(GENERATED_CODE, 0, 0, 0));
@@ -2245,18 +2305,10 @@ public class EclipseHandlerUtil {
 	public static IntLiteral makeIntLiteral(char[] token, ASTNode source) {
 		int pS = source == null ? 0 : source.sourceStart, pE = source == null ? 0 : source.sourceEnd;
 		IntLiteral result;
-		try {
-			if (intLiteralConstructor != null) {
-				result = intLiteralConstructor.newInstance(token, pS, pE);
-			} else {
-				result = (IntLiteral) intLiteralFactoryMethod.invoke(null, token, pS, pE);
-			}
-		} catch (InvocationTargetException e) {
-			throw Lombok.sneakyThrow(e.getCause());
-		} catch (IllegalAccessException e) {
-			throw Lombok.sneakyThrow(e);
-		} catch (InstantiationException e) {
-			throw Lombok.sneakyThrow(e);
+		if (intLiteralConstructor != null) {
+			result = Permit.newInstanceSneaky(intLiteralConstructor, token, pS, pE);
+		} else {
+			result = (IntLiteral) Permit.invokeSneaky(intLiteralFactoryMethod, null, token, pS, pE);
 		}
 		
 		if (source != null) setGeneratedBy(result, source);
@@ -2410,18 +2462,7 @@ public class EclipseHandlerUtil {
 	}
 	
 	public static NameReference createNameReference(String name, Annotation source) {
-		int pS = source.sourceStart, pE = source.sourceEnd;
-		long p = (long)pS << 32 | pE;
-		
-		char[][] nameTokens = fromQualifiedName(name);
-		long[] pos = new long[nameTokens.length];
-		Arrays.fill(pos, p);
-		
-		QualifiedNameReference nameReference = new QualifiedNameReference(nameTokens, pos, pS, pE);
-		nameReference.statementEnd = pE;
-		
-		setGeneratedBy(nameReference, source);
-		return nameReference;
+		return generateQualifiedNameRef(source, fromQualifiedName(name));
 	}
 	
 	private static long[] copy(long[] array) {
@@ -2574,5 +2615,219 @@ public class EclipseHandlerUtil {
 		else ref = new SingleTypeReference(varNames[0], p);
 		setGeneratedBy(ref, source);
 		return ref;
+	}
+	
+	public static TypeReference createTypeReference(String typeName, ASTNode source) {
+		return generateQualifiedTypeRef(source, fromQualifiedName(typeName));
+	}
+	
+	/**
+	 * Returns {@code true} if the provided node is an actual class and not some other type declaration (so, not an annotation definition, interface, enum, or record).
+	 */
+	public static boolean isClass(EclipseNode typeNode) {
+		return isTypeAndDoesNotHaveFlags(typeNode, ClassFileConstants.AccInterface | ClassFileConstants.AccEnum | ClassFileConstants.AccAnnotation | AccRecord);
+	}
+	
+	/**
+	 * Returns {@code true} if the provided node is an actual class or enum and not some other type declaration (so, not an annotation definition, interface, or record).
+	 */
+	public static boolean isClassOrEnum(EclipseNode typeNode) {
+		return isTypeAndDoesNotHaveFlags(typeNode, ClassFileConstants.AccInterface | ClassFileConstants.AccAnnotation | AccRecord);
+	}
+	
+	/**
+	 * Returns {@code true} if the provided node is a record declaration (so, not an annotation definition, interface, enum, or plain class).
+	 */
+	public static boolean isRecord(EclipseNode typeNode) {
+		TypeDeclaration typeDecl = null;
+		if (typeNode.get() instanceof TypeDeclaration) typeDecl = (TypeDeclaration) typeNode.get();
+		int modifiers = typeDecl == null ? 0 : typeDecl.modifiers;
+		return (modifiers & AccRecord) != 0;
+	}
+	
+	/**
+	 * Returns {@code true} If the provided node is a field declaration, and represents a field in a {@code record} declaration.
+	 */
+	public static boolean isRecordField(EclipseNode fieldNode) {
+		return fieldNode.getKind() == Kind.FIELD && (((FieldDeclaration) fieldNode.get()).modifiers & AccRecord) != 0;
+	}
+	
+	/**
+	 * Returns {@code true) if the provided node is a type declaration <em>and</em> is <strong>not</strong> of any kind indicated by the flags (the intent is to pass flags usch as `ClassFileConstants.AccEnum`).
+	 */
+	static boolean isTypeAndDoesNotHaveFlags(EclipseNode typeNode, long flags) {
+		TypeDeclaration typeDecl = null;
+		if (typeNode.get() instanceof TypeDeclaration) typeDecl = (TypeDeclaration) typeNode.get();
+		int modifiers = typeDecl == null ? 0 : typeDecl.modifiers;
+		return (modifiers & flags) == 0;
+	}
+	
+	public static AbstractVariableDeclaration[] getRecordComponents(TypeDeclaration typeDeclaration) {
+		if (typeDeclaration == null || (typeDeclaration.modifiers & AccRecord) == 0) return null;
+		try {
+			return (AbstractVariableDeclaration[]) TYPE_DECLARATION_RECORD_COMPONENTS.get(typeDeclaration);
+		} catch (Exception e) {
+			// This presumably means this isn't a JDK16 - fall through.
+		}
+		return null;
+	}
+	
+	public static Annotation[][] getRecordFieldAnnotations(TypeDeclaration typeDeclaration) {
+		if (typeDeclaration.fields == null) return null;
+		Annotation[][] annotations = new Annotation[typeDeclaration.fields.length][];
+		
+		AbstractVariableDeclaration[] recordComponents = getRecordComponents(typeDeclaration);
+		if (recordComponents != null) {
+			int j = 0;
+			for (int i = 0; i < typeDeclaration.fields.length; i++) {
+				if ((typeDeclaration.fields[i].modifiers & AccRecord) != 0) {
+					annotations[i] = recordComponents[j++].annotations;
+				}
+			}
+		}
+		return annotations;
+	}
+	
+	public static String getDocComment(EclipseNode eclipseNode) {
+		if (eclipseNode.getAst().getSource() == null) return null;
+		
+		final ASTNode node = eclipseNode.get();
+		if (node instanceof FieldDeclaration) {
+			FieldDeclaration fieldDeclaration = (FieldDeclaration) node;
+			char[] rawContent = CharOperation.subarray(eclipseNode.getAst().getSource(), fieldDeclaration.declarationSourceStart, fieldDeclaration.declarationSourceEnd);
+			String rawContentString = new String(rawContent);
+			int startIndex = rawContentString.indexOf("/**");
+			int endIndex = rawContentString.indexOf("*/");
+			if (startIndex != -1 && endIndex != -1) {
+				/* Remove all leading asterisks */
+				return rawContentString.substring(startIndex + 3, endIndex).replaceAll("(?m)^\\s*\\* ?", "").trim();
+			}
+		}
+		return null;
+	}
+	
+	public static void setDocComment(CompilationUnitDeclaration cud, EclipseNode eclipseNode, String doc) {
+		setDocComment(cud, (TypeDeclaration) upToTypeNode(eclipseNode).get(), eclipseNode.get(), doc);
+	}
+	 
+	public static void setDocComment(CompilationUnitDeclaration cud, TypeDeclaration type, ASTNode node, String doc) {
+		if (doc == null) return;
+		
+		Map<String, String> docs = EcjAugments.CompilationUnit_javadoc.setIfAbsent(cud.compilationResult.compilationUnit, new HashMap<String, String>());
+		if (node instanceof AbstractMethodDeclaration) {
+			AbstractMethodDeclaration methodDeclaration = (AbstractMethodDeclaration) node;
+			String signature = getSignature(type, methodDeclaration);
+			/* Add javadoc start marker, remove trailing line break, add leading asterisks to each line, add javadoc end marker */
+			docs.put(signature, String.format("/**%n%s%n */", doc.replaceAll("$\\r?\\n", "").replaceAll("(?m)^", " * ")));
+		}
+	}
+	
+	public static String getSignature(TypeDeclaration type, AbstractMethodDeclaration methodDeclaration) {
+		StringBuilder sb = new StringBuilder();
+		sb.append(type.name);
+		sb.append(".");
+		sb.append(methodDeclaration.selector);
+		sb.append("(");
+		Argument[] arguments = methodDeclaration.arguments;
+		if (arguments != null) {
+			for (Argument argument : arguments) {
+				sb.append(String.valueOf(argument.type));
+			}
+		}
+		sb.append(")");
+		return sb.toString();
+	}
+	
+	public static enum CopyJavadoc {
+		VERBATIM {
+			@Override public String apply(final EclipseNode node) {
+				return getDocComment(node);
+			}
+		},
+		GETTER {
+			@Override public String apply(final EclipseNode node) {
+				String javadoc = getDocComment(node);
+				// step 1: Check if there is a 'GETTER' section. If yes, that becomes the new method's javadoc.
+				String out = getJavadocSection(javadoc, "GETTER");
+				final boolean sectionBased = out != null;
+				if (!sectionBased) {
+					out = stripLinesWithTagFromJavadoc(stripSectionsFromJavadoc(javadoc), JavadocTag.PARAM);
+				}
+				return out;
+			}
+		},
+		SETTER {
+			@Override public String apply(final EclipseNode node) {
+				return applySetter(node, "SETTER");
+			}
+		},
+		WITH {
+			@Override public String apply(final EclipseNode node) {
+				return addReturnsUpdatedSelfIfNeeded(applySetter(node, "WITH|WITHER"));
+			}
+		},
+		WITH_BY {
+			@Override public String apply( final EclipseNode node) {
+				return applySetter(node, "WITHBY|WITH_BY");
+			}
+		};
+		
+		public abstract String apply(final EclipseNode node);
+		
+		private static String applySetter(EclipseNode node, String sectionName) {
+			String javadoc = getDocComment(node);
+			// step 1: Check if there is a 'SETTER' section. If yes, that becomes the new method's javadoc.
+			String out = getJavadocSection(javadoc, sectionName);
+			final boolean sectionBased = out != null;
+			if (!sectionBased) {
+				out = stripLinesWithTagFromJavadoc(stripSectionsFromJavadoc(javadoc), JavadocTag.RETURN);
+			}
+			return shouldReturnThis(node) ? addReturnsThisIfNeeded(out) : out;
+		}
+	}
+	
+	/**
+	 * Copies javadoc on one node to the other.
+	 * 
+	 * This one is a shortcut for {@link EclipseHandlerUtil#copyJavadoc(EclipseNode, ASTNode, TypeDeclaration, CopyJavadoc, boolean)}
+	 * if source and target node are in the same type.
+	 */
+	public static void copyJavadoc(EclipseNode from, ASTNode to, CopyJavadoc copyMode) {
+		copyJavadoc(from, to, (TypeDeclaration) upToTypeNode(from).get(), copyMode, false);
+	}
+	
+	/**
+	 * Copies javadoc on one node to the other.
+	 * 
+	 * This one is a shortcut for {@link EclipseHandlerUtil#copyJavadoc(EclipseNode, ASTNode, TypeDeclaration, CopyJavadoc, boolean)}
+	 * if source and target node are in the same type.
+	 */
+	public static void copyJavadoc(EclipseNode from, ASTNode to, CopyJavadoc copyMode, boolean forceAddReturn) {
+		copyJavadoc(from, to, (TypeDeclaration) upToTypeNode(from).get(), copyMode, forceAddReturn);
+	}
+	
+	public static void copyJavadoc(EclipseNode from, ASTNode to, TypeDeclaration type, CopyJavadoc copyMode) {
+		copyJavadoc(from, to, type, copyMode, false);
+	}
+	
+	/**
+	 * Copies javadoc on one node to the other.
+	 * 
+	 * in 'GETTER' copyMode, first a 'GETTER' segment is searched for. If it exists, that will become the javadoc for the 'to' node, and this section is
+	 * stripped out of the 'from' node. If no 'GETTER' segment is found, then the entire javadoc is taken minus any {@code @param} lines and other sections.
+	 * any {@code @return} lines are stripped from 'from'.
+	 * 
+	 * in 'SETTER' mode, stripping works similarly to 'GETTER' mode, except {@code param} are copied and stripped from the original and {@code @return} are skipped.
+	 */
+	public static void copyJavadoc(EclipseNode from, ASTNode to, TypeDeclaration type, CopyJavadoc copyMode, boolean forceAddReturn) {
+		if (copyMode == null) copyMode = CopyJavadoc.VERBATIM;
+		try {
+			CompilationUnitDeclaration cud = ((CompilationUnitDeclaration) from.top().get());
+			String newJavadoc = copyMode.apply(from);
+			if (forceAddReturn) {
+				newJavadoc = addReturnsThisIfNeeded(newJavadoc);
+			}
+			setDocComment(cud, type, to, newJavadoc);
+		} catch (Exception ignore) {}
 	}
 }
